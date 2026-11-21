@@ -11,6 +11,7 @@ browser_hostname: "127.0.0.1"
 remote_operations: false
 auto_commit: false
 filesystem_only: true
+zero_padded_ids: 3
 bypass_git_hooks: false
 check_active_branches: false
 active_branch_days: 30
