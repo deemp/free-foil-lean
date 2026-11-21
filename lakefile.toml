@@ -1,11 +1,15 @@
 name = "free-foil"
 version = "0.1.0"
-defaultTargets = ["FreeFoil"]
+defaultTargets = ["FreeFoil", "lambdaPi"]
 testDriver = "freeFoilTests"
 
 [[lean_lib]]
 name = "FreeFoil"
-roots = ["FreeFoil", "FreeFoil.Examples.LambdaPi"]
+roots = ["FreeFoil", "FreeFoil.Examples.LambdaPi", "FreeFoil.Examples.LambdaPi.Program"]
+
+[[lean_exe]]
+name = "lambdaPi"
+root = "LambdaPiMain"
 
 [[lean_exe]]
 name = "freeFoilTests"

@@ -1,4 +1,4 @@
-import FreeFoil.Examples.LambdaPi
+import FreeFoil.Examples.LambdaPi.Program
 
 open FreeFoil
 open FreeFoil.Examples.LambdaPi
@@ -112,10 +112,69 @@ private def evaluationTests : IO Unit := do
   | .error .outOfFuel => pure ()
   | .ok _ => throw (IO.userError "a diverging term returned a weak-head normal form")
 
+private def parseClosed (text : String) : IO (Term []) := do
+  closed (← expectOk (Parser.parseTerm text))
+
+private def lambdaPiPatternTests : IO Unit := do
+  let term ← parseClosed "(λ (x, (_, y)). y x) ((λ a. a, (𝕌, λ b. b)))"
+  let result ← expectOk (whnf [] 16 term)
+  let identity ← parseClosed "λ a. a"
+  check "nested pair binders lost binding order" (result.alphaEquiv identity)
+  let wildcard ← parseClosed "(λ (_, _). 𝕌) ((λ x. x x) (λ x. x x))"
+  let result ← expectOk (whnf [] 4 wildcard)
+  check "an unused pair argument was evaluated" (result.alphaEquiv (← closed Raw.univ))
+
+  let fn ← parseClosed "λ (x, _). λ y. x"
+  let scope : Scope := [1]
+  let y : Name scope := ⟨1, by simp [scope]⟩
+  let arg : Term scope := AST.node .pair (fun _ => AST.var y) Fin.elim0
+  let term : Term scope := AST.node .app (Fin.cases (fn.sink (by simp)) fun _ => arg) Fin.elim0
+  let result ← expectOk (whnf scope 16 term)
+  let expectedRaw ← expectOk (Parser.parseTerm "λ z. π₁((y, y))")
+  let expected ← expectOk (AST.fromNamed scope (fun name => if name == "y" then some y else none) expectedRaw)
+  check "pair substitution captured the free argument" (result.alphaEquiv expected && result.freeVars == [1])
+
+  let duplicate ← expectOk (Parser.parseTerm "Π ((x, (_, x)) : 𝕌) → x")
+  match AST.fromClosed duplicate with
+  | .error (.duplicateBinder ["x", "x"]) => pure ()
+  | _ => throw (IO.userError "a duplicate name in a nested Pi pattern was accepted")
+
+private def lambdaPiProgramTests : IO Unit := do
+  for text in [
+    "Π ((a, (_, b)) : ((𝕌) × ((𝕌) × (𝕌)))) → λ _. (a, b)",
+    "(λ x. x) ((𝕌, π₂((𝕌, 𝕌))))",
+    "λ f. λ x. f (f x)",
+    "λ f. λ x. f x × f x"
+  ] do
+    let before ← parseClosed text
+    let after ← parseClosed (prettyTerm (before.toNamed [] fun x => nomatch x.property))
+    check s!"parse and print round trip changed {text}" (before.alphaEquiv after)
+
+  let program ← expectOk (Parser.parseProgram
+    "-- a multiline command\ncompute\n  (λ (x, _). x) ((𝕌, 𝕌)) : 𝕌\n{- comment -}\ncheck 𝕌 : 𝕌;")
+  check "program commands were lost" (program.size == 2)
+  let some command := program[0]? | throw (IO.userError "program has no compute command")
+  check "interpretation did not print weak-head normal form"
+    ((interpret 16 command).toOption == some "𝕌")
+  check "malformed patterns did not produce a parse error"
+    (Parser.parseProgram "compute λ (x,). x : 𝕌").toOption.isNone
+  check "unterminated comments did not produce a parse error"
+    (Parser.parseProgram "{- comment").toOption.isNone
+  let openTerm ← expectOk (Parser.parseTerm "missing")
+  match interpret 16 (.compute openTerm Raw.univ) with
+  | .error (.scope (.unbound "missing")) => pure ()
+  | _ => throw (IO.userError "the interpreter did not report an unresolved free name")
+  let divergent ← expectOk (Parser.parseTerm "(λ x. x x) (λ x. x x)")
+  match interpret 8 (.compute divergent Raw.univ) with
+  | .error (.evaluation .outOfFuel) => pure ()
+  | _ => throw (IO.userError "the interpreter did not report evaluation fuel exhaustion")
+
 def main : IO Unit := do
   alphaTests
   captureTest
   conversionTests
   patternTests
   evaluationTests
+  lambdaPiPatternTests
+  lambdaPiProgramTests
   IO.println "Free Foil regression tests passed"

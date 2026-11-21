@@ -7,8 +7,13 @@ inductive Op where
   deriving DecidableEq
 
 inductive Pattern where
-  | wildcard | variable
+  | wildcard | variable | pair (left right : Pattern)
   deriving DecidableEq
+
+def Pattern.binders : Pattern → Nat
+  | .wildcard => 0
+  | .variable => 1
+  | .pair left right => left.binders + right.binders
 
 abbrev sig : Signature where
   Op := Op
@@ -20,9 +25,7 @@ abbrev sig : Signature where
   scopes
     | .lam | .pi => 1
     | _ => 0
-  binders
-    | .wildcard => 0
-    | .variable => 1
+  binders := Pattern.binders
 
 abbrev Term := AST sig
 abbrev Raw := Syntax sig String
@@ -33,14 +36,28 @@ def var (name : String) : Raw := Syntax.var name
 
 def app (fn arg : Raw) : Raw := .node .app (Fin.cases fn fun _ => arg) Fin.elim0 Fin.elim0
 
+def wildcard : Binder sig String := ⟨.wildcard, [], rfl⟩
+
+def varPattern (name : String) : Binder sig String := ⟨.variable, [name], rfl⟩
+
+def pairPattern (left right : Binder sig String) : Binder sig String :=
+  ⟨.pair left.shape right.shape, left.names ++ right.names, by
+    simp [sig, Pattern.binders, left.arity, right.arity]⟩
+
+def lamPattern (binder : Binder sig String) (body : Raw) : Raw :=
+  .node .lam Fin.elim0 (fun _ => binder) (fun _ => body)
+
 def lam (name : String) (body : Raw) : Raw :=
-  .node .lam Fin.elim0 (fun _ => ⟨.variable, [name], rfl⟩) (fun _ => body)
+  lamPattern (varPattern name) body
 
 def lamWildcard (body : Raw) : Raw :=
-  .node .lam Fin.elim0 (fun _ => ⟨.wildcard, [], rfl⟩) (fun _ => body)
+  lamPattern wildcard body
+
+def piPattern (binder : Binder sig String) (domain codomain : Raw) : Raw :=
+  .node .pi (fun _ => domain) (fun _ => binder) (fun _ => codomain)
 
 def pi (name : String) (domain codomain : Raw) : Raw :=
-  .node .pi (fun _ => domain) (fun _ => ⟨.variable, [name], rfl⟩) (fun _ => codomain)
+  piPattern (varPattern name) domain codomain
 
 def univ : Raw := .node .univ Fin.elim0 Fin.elim0 Fin.elim0
 
@@ -58,6 +75,16 @@ inductive EvalError where
   | outOfFuel
   deriving Repr
 
+private def Pattern.arguments (shape : Pattern) (arg : Term scope) :
+    Fin shape.binders → Term scope :=
+  match shape with
+  | .wildcard => Fin.elim0
+  | .variable => fun _ => arg
+  | .pair left right =>
+    let fst := AST.node (sig := sig) .first (fun _ => arg) Fin.elim0
+    let snd := AST.node (sig := sig) .second (fun _ => arg) Fin.elim0
+    Fin.addCases (left.arguments fst) (right.arguments snd)
+
 /-- Weak-head evaluation with a bound on recursive evaluation depth. -/
 def whnf (scope : Scope) (fuel : Nat) (term : Term scope) : Except EvalError (Term scope) :=
   match fuel with
@@ -69,7 +96,9 @@ def whnf (scope : Scope) (fuel : Nat) (term : Term scope) : Except EvalError (Te
       let arg := terms 1
       match fn.view with
       | .node .lam _ children =>
-        whnf scope fuel ((children 0).instantiate scope .identity (fun _ => arg))
+        let child := children 0
+        let args i := child.binder.shape.arguments arg (Fin.cast child.binder.arity i)
+        whnf scope fuel (child.instantiate scope .identity args)
       | _ => pure (AST.node .app (Fin.cases fn fun _ => arg) Fin.elim0)
     | .node .first terms _ => do
       let pair ← whnf scope fuel (terms 0)

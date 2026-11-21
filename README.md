@@ -27,7 +27,15 @@ open FreeFoil FreeFoil.Examples.LambdaPi
 -- some true
 ```
 
-The example also supports dependent function types, wildcard binders, pairs, and projections. Its evaluator reports fuel exhaustion on inputs that do not reach a weak-head normal form within the evaluation budget.
+The example also supports dependent function types, recursive pair patterns, wildcard binders, pairs, and projections. Its evaluator reports fuel exhaustion on inputs that do not reach a weak-head normal form within the evaluation budget.
+
+Run an upstream-style λΠ program with `lake exe lambdaPi program.lp`, or send it to standard input.
+
+```sh
+printf '%s\n' 'compute (λ (x, _). x) ((𝕌, 𝕌)) : 𝕌;' | lake exe lambdaPi
+```
+
+The example prints `𝕌`. The interpreter evaluates each closed `compute` term to weak-head normal form. It parses type annotations and reports `check` commands as unimplemented.
 
 ## Define a signature
 
