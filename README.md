@@ -45,5 +45,6 @@ Import `FreeFoil` for the generic library. A `Signature` gives each operator an 
 - `AST sig scope` carries a Lean proof that all variable occurrences resolve in the current context. `AST.view` exposes one layer of the tree. `AST.sink` uses context inclusion and reuses the underlying tree in constant time.
 - `AST.substitute` refreshes colliding binders as it traverses the input. `ScopedAST.instantiate` accepts one argument for each bound name. `AST.refresh` assigns canonical names to all binders, and `AST.toNamed` makes those names available as strings.
 - `AST.freeVars` computes the support, `AST.restrict` checks a smaller context, and `AST.fold` and `AST.hoist` support generic consumers and signature transformations.
+- `Telescope` stores labelled binders whose payloads can refer to earlier entries. `Telescope.rename` carries those references into the new scope, and `Telescope.thin` keeps the entries a term uses, including dependencies in their payloads.
 
 This port covers the core library and a λΠ example built directly in Lean. Upstream Template Haskell generators, binary artifacts and module linking, and the SOAS and MLTT applications are outside the current port. Context membership and fresh-name allocation currently use lists. Runtime performance parity with Haskell has not been measured.

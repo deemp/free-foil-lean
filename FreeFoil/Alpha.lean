@@ -25,9 +25,15 @@ private def alphaEq [DecidableEq sig.Op] [DecidableEq sig.Pattern]
   | _, _ => false
 termination_by structural left
 
+/-- Compare terms under corresponding binders, listed from innermost to outermost.
+Identifiers outside those binders must agree. -/
+def alphaEquivUnder [DecidableEq sig.Op] [DecidableEq sig.Pattern]
+    (left : AST sig source) (right : AST sig target) (bindings : List (Nat × Nat)) : Bool :=
+  alphaEq left.syntaxTree right.syntaxTree bindings
+
 /-- Compare terms up to renaming of bound variables. Free identifiers must agree. -/
 def alphaEquiv [DecidableEq sig.Op] [DecidableEq sig.Pattern]
     (left right : AST sig scope) : Bool :=
-  alphaEq left.syntaxTree right.syntaxTree []
+  left.alphaEquivUnder right []
 
 end FreeFoil.AST

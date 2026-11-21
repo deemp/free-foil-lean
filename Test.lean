@@ -98,6 +98,70 @@ private def patternTests : IO Unit := do
     check "pattern arguments were substituted out of order" (result.freeVars == [9])
   | .var _ => throw (IO.userError "expected a scoped pattern")
 
+private def telescopeTests : IO Unit := do
+  let universeTerm ← closed Raw.univ
+  let telescope : Telescope String Term [] [9, 6, 3] :=
+    .cons "A" universeTerm 3 (by decide)
+      (.cons "x" (AST.var ⟨3, by simp⟩) 6 (by decide)
+        (.cons "B" (universeTerm.sink (by simp)) 9 (by decide) .nil))
+  let term : Term [9, 6, 3] := AST.var ⟨6, by simp⟩
+  check "telescope extension did not add each binder" (telescope.extendScope == [9, 6, 3])
+
+  let renamed := telescope.rename [] id (fun renameName payload => payload.rename renameName)
+  check "renaming did not change the telescope binder identifiers" (renamed.scope == [2, 1, 0])
+  check "renaming changed dependent payloads up to alpha-equivalence"
+    (telescope.alphaEquiv renamed.telescope)
+  check "the lifted renaming did not move the term's reference"
+    ((term.rename renamed.renameName).freeVars == [1])
+
+  let some thinned := telescope.thin term | throw (IO.userError "dependent telescope thinning failed")
+  check "thinning did not retain A and x and drop B" (thinned.scope == [6, 3])
+  check "thinning changed the term's reference" (thinned.term.freeVars == [6])
+  match thinned.scope, thinned.telescope with
+  | _, .cons label domain a _ (.cons label' payload _ _ _) =>
+    check "thinning changed the order of the telescope entries" (label == "A" && label' == "x")
+    check "thinning changed a payload" (domain.alphaEquiv universeTerm && payload.freeVars == [a])
+  | _, _ => throw (IO.userError "expected two retained entries")
+
+  let relabelled : Telescope String Term [] [1, 0] :=
+    .cons "T" universeTerm 0 (by decide) (.cons "y" (AST.var ⟨0, by simp⟩) 1 (by decide) .nil)
+  let independent : Telescope String Term [] [1, 0] :=
+    .cons "T" universeTerm 0 (by decide) (.cons "y" (universeTerm.sink (by simp)) 1 (by decide) .nil)
+  check "alpha-equivalence considered entry labels" (thinned.telescope.alphaEquiv relabelled)
+  check "alpha-equivalence ignored a dependent payload" (!thinned.telescope.alphaEquiv independent)
+  check "alpha-equivalence ignored telescope length" (!thinned.telescope.alphaEquiv telescope)
+
+private def openTelescopeTests : IO Unit := do
+  let universeTerm ← closed Raw.univ
+  let payload ← expectOk (AST.fromNamed [7, 8, 4] (fun name => match name with
+    | "ambient" => some ⟨4, by simp⟩
+    | "A" => some ⟨8, by simp⟩
+    | _ => none) (Raw.lam "z" (Raw.pair (Raw.var "ambient") (Raw.var "A"))))
+  let telescope : Telescope String Term [4] [5, 6, 7, 8, 4] :=
+    .cons "A" (universeTerm.sink (by simp)) 8 (by decide)
+      (.cons "unused" (universeTerm.sink (by simp)) 7 (by decide)
+        (.cons "x" payload 6 (by decide)
+          (.cons "y" (AST.var ⟨6, by simp⟩) 5 (by decide) .nil)))
+  let term : Term [5, 6, 7, 8, 4] := AST.var ⟨5, by simp⟩
+  let some thinned := telescope.thin term | throw (IO.userError "transitive telescope thinning failed")
+  check "thinning lost a transitive dependency or retained the unused middle entry"
+    (thinned.scope == [5, 6, 8, 4] && thinned.term.freeVars == [5])
+
+  let ambient : Term [5, 6, 7, 8, 4] := AST.var ⟨4, by simp⟩
+  let some thinned := telescope.thin ambient | throw (IO.userError "thinning to the ambient scope failed")
+  check "thinning an ambient reference did not preserve the ambient scope"
+    (thinned.scope == [4] && thinned.term.freeVars == [4])
+
+  let renamed := telescope.rename [8] (fun _ => ⟨8, by simp⟩)
+    (fun renameName payload => payload.rename renameName)
+  let rec supports {outer inner : Scope} (entries : Telescope String Term outer inner) :
+      List (List Nat) :=
+    match entries with
+    | .nil => []
+    | .cons _ payload _ _ rest => payload.freeVars :: supports rest
+  check "renaming captured a free name or lost a payload dependency"
+    (supports renamed.telescope == [[], [], [8, 9], [11]])
+
 private def evaluationTests : IO Unit := do
   let term ← closed (Raw.second (Raw.pair (Raw.lam "x" (Raw.var "x")) Raw.univ))
   let expected ← closed Raw.univ
@@ -174,6 +238,8 @@ def main : IO Unit := do
   captureTest
   conversionTests
   patternTests
+  telescopeTests
+  openTelescopeTests
   evaluationTests
   lambdaPiPatternTests
   lambdaPiProgramTests

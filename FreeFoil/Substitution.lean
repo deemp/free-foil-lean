@@ -88,6 +88,10 @@ def substitute (term : AST sig source) (target : Scope)
   | .weakening h => term.sink h
   | .mapping _ => term.substituteUsing false target subst
 
+/-- Rename free names, refreshing any binders that would capture them. -/
+def rename (term : AST sig source) (renameName : Name source → Name target) : AST sig target :=
+  term.substitute target (.mapping fun name => .var (renameName name))
+
 /-- Apply a substitution, allocating canonical fresh names for each visited binder. -/
 def substituteRefreshed (term : AST sig source) (target : Scope)
     (subst : Substitution sig source target) : AST sig target :=
