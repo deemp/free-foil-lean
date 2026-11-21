@@ -1,4 +1,5 @@
 import FreeFoil.Examples.LambdaPi.Program
+import FreeFoil.Tests.SubstitutionLaws
 
 open FreeFoil
 open FreeFoil.Examples.LambdaPi

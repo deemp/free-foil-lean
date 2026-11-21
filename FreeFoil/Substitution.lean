@@ -1,4 +1,5 @@
 import FreeFoil.AST
+import FreeFoil.Lexical
 
 namespace FreeFoil
 
@@ -26,6 +27,45 @@ def extend (subst : Substitution sig source target) (names : List Nat)
       args ⟨names.idxOf name.id, List.idxOf_lt_length_of_mem bound⟩
     else
       subst.lookup ⟨name.id, (List.mem_append.mp name.property).resolve_left bound⟩
+
+@[inline] private def liftBinder (subst : Substitution sig source target)
+    (oldNames newNames : List Nat) (arity : newNames.length = oldNames.length) :
+    Substitution sig (oldNames ++ source) (newNames ++ target) :=
+  let lifted : Substitution sig source (newNames ++ target) := .mapping fun name =>
+    (subst.lookup name).sink (fun {_} mem => List.mem_append_right _ mem)
+  lifted.extend oldNames fun i =>
+    let j : Fin newNames.length := Fin.cast arity.symm i
+    .var ⟨newNames[j], List.mem_append_left _ (List.getElem_mem j.isLt)⟩
+
+/-- Interpret the images of the substitution in the given lexical assignment. -/
+def interpret (subst : Substitution sig source target) (env : Lexical.Assignment sig) :
+    Lexical.Assignment sig :=
+  fun id depth =>
+    if mem : id ∈ source then
+      Lexical.interpret (subst.lookup ⟨id, mem⟩).syntaxTree depth env
+    else env id depth
+
+private theorem interpret_liftBinder (subst : Substitution sig source target)
+    (oldNames newNames : List Nat) (arity : newNames.length = oldNames.length)
+    (distinct : newNames.Nodup) (fresh : ∀ id ∈ newNames, id ∉ target)
+    (env : Lexical.Assignment sig) (depth : Nat) {id : Nat} (mem : id ∈ oldNames ++ source)
+    (current : Nat) :
+    (subst.liftBinder oldNames newNames arity).interpret (Lexical.under env newNames depth)
+        id current =
+      Lexical.under (subst.interpret env) oldNames depth id current := by
+  by_cases bound : id ∈ oldNames
+  · let j : Fin newNames.length :=
+      Fin.cast arity.symm ⟨oldNames.idxOf id, List.idxOf_lt_length_of_mem bound⟩
+    simp [interpret, mem, Lexical.under, bound, liftBinder, extend, lookup, AST.var, Name.id,
+      Lexical.interpret, ← show j.val = oldNames.idxOf id from rfl, distinct.idxOf_getElem,
+      arity]
+  · have outer : id ∈ source := (List.mem_append.mp mem).resolve_left bound
+    simp only [interpret, mem, dite_eq_left, liftBinder, extend, lookup, Name.id, bound,
+      AST.sink, Lexical.under, outer]
+    apply Lexical.interpret_congr _ (subst.lookup ⟨id, outer⟩).wellScoped
+    intro name inTarget _
+    have notBound : name ∉ newNames := fun h => fresh name h inTarget
+    simp [Lexical.under, notBound]
 
 end Substitution
 
@@ -71,12 +111,7 @@ private def substituteUsing (force : Bool) (term : AST sig source) (target : Sco
     (fun binder _ body scope env =>
       let names := scope.freshen force binder.names
       let newBinder : Binder sig Nat := ⟨binder.shape, names.val, names.property.1.trans binder.arity⟩
-      let lifted : Substitution sig _ (newBinder.names ++ scope) := .mapping fun name =>
-        (env.lookup name).sink (fun {_} mem => List.mem_append_right _ mem)
-      let extended := lifted.extend binder.names fun i =>
-        let j : Fin newBinder.names.length := Fin.cast names.property.1.symm i
-        .var ⟨newBinder.names[j], List.mem_append_left _ (List.getElem_mem j.isLt)⟩
-      ⟨newBinder, names.property.2.1, body _ extended⟩)
+      ⟨newBinder, names.property.2.1, body _ (env.liftBinder binder.names names.val names.property.1)⟩)
     (fun op terms children scope env => .node op
       (fun i => terms i scope env) (fun i => children i scope env))
     target subst
@@ -101,7 +136,65 @@ def substituteRefreshed (term : AST sig source) (target : Scope)
 def refresh (scope : Scope) (term : AST sig scope) : AST sig scope :=
   term.substituteRefreshed scope .identity
 
+private theorem interpret_substituteUsing (force : Bool) (tree : Syntax sig Nat)
+    (wf : tree.WellScoped source) (subst : Substitution sig source target)
+    (depth : Nat) (env : Lexical.Assignment sig) :
+    Lexical.interpret ((⟨tree, wf⟩ : AST sig source).substituteUsing force target subst).syntaxTree
+        depth env =
+      Lexical.interpret tree depth (subst.interpret env) := by
+  induction tree generalizing source target depth env with
+  | var id =>
+    have mem : id ∈ source := wf
+    simp only [Lexical.interpret, Substitution.interpret, mem, dite_eq_left]
+    rfl
+  | node op terms binders bodies ihTerms ihBodies =>
+    let freshNames i := target.freshen force (binders i).names
+    change Lexical.node op
+      (fun i => Lexical.interpret (substituteUsing force ⟨terms i, wf.1 i⟩ target subst).syntaxTree
+        depth env)
+      (fun i => (binders i).shape)
+      (fun i => Lexical.interpret (substituteUsing force ⟨bodies i, (wf.2 i).2⟩ _
+        (subst.liftBinder (binders i).names (freshNames i).val (freshNames i).property.1)).syntaxTree
+        (depth + sig.binders (binders i).shape) (Lexical.under env (freshNames i).val depth)) = _
+    simp only [Lexical.interpret]
+    congr 1
+    · funext i
+      exact ihTerms i (wf.1 i) subst depth env
+    · funext i
+      rw [ihBodies]
+      apply Lexical.interpret_congr _ (wf.2 i).2
+      intro _ mem current
+      exact subst.interpret_liftBinder _ _ (freshNames i).property.1 (freshNames i).property.2.1
+        (freshNames i).property.2.2 env depth mem current
+
+/-- Substitution acts on the lexical interpretation by interpreting each image at the
+depth of the occurrence. -/
+theorem interpret_substitute (term : AST sig source) (subst : Substitution sig source target)
+    (depth : Nat) (env : Lexical.Assignment sig) :
+    Lexical.interpret (term.substitute target subst).syntaxTree depth env =
+      Lexical.interpret term.syntaxTree depth (subst.interpret env) := by
+  cases subst with
+  | weakening included =>
+    apply Lexical.interpret_congr _ term.wellScoped
+    intro id mem current
+    simp [Substitution.interpret, mem, Substitution.lookup, AST.var, Lexical.interpret]
+    rfl
+  | mapping lookup => exact interpret_substituteUsing false term.syntaxTree term.wellScoped _ depth env
+
+/-- The lexical interpretation of substitution is independent of fresh-name choices. -/
+theorem interpret_substituteRefreshed (term : AST sig source) (subst : Substitution sig source target)
+    (depth : Nat) (env : Lexical.Assignment sig) :
+    Lexical.interpret (term.substituteRefreshed target subst).syntaxTree depth env =
+      Lexical.interpret term.syntaxTree depth (subst.interpret env) :=
+  interpret_substituteUsing true term.syntaxTree term.wellScoped subst depth env
+
 end AST
+
+/-- Compose substitutions in application order. Apply `second` to the images of `first`. -/
+def Substitution.compose {sig : Signature} {source middle target : Scope}
+    (first : Substitution sig source middle) (second : Substitution sig middle target) :
+    Substitution sig source target :=
+  .mapping fun name => (first.lookup name).substitute target second
 
 /-- Substitute pattern arguments for bound names and use `env` for the outer names. -/
 def ScopedAST.instantiate {sig : Signature} {source : Scope} (child : ScopedAST sig source)
