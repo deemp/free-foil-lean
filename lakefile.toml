@@ -5,7 +5,7 @@ testDriver = "freeFoilTests"
 
 [[lean_lib]]
 name = "FreeFoil"
-roots = ["FreeFoil", "FreeFoil.Examples.LambdaPi", "FreeFoil.Examples.LambdaPi.Program"]
+roots = ["FreeFoil", "FreeFoil.Examples.LambdaPi", "FreeFoil.Examples.LambdaPi.Program", "FreeFoil.Examples.SOAS"]
 
 [[lean_exe]]
 name = "lambdaPi"

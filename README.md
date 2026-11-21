@@ -53,4 +53,10 @@ Import `FreeFoil.Derive` and declare an inductive for the named syntax, with a `
 
 The [λΠ example](FreeFoil/Examples/LambdaPi.lean) runs `derive_free_foil NamedTerm with Pattern, Pattern.binders` to generate `Op`, `sig`, `Raw`, and `Term` in its namespace. It also generates constructor helpers, a conversion between `NamedTerm` and `Raw`, and `NamedTerm.resolveClosed` to check scope. Constructor helpers for `Raw` take a binder and body separately at each scoped position.
 
-This port covers the core library, generation for a single unparameterized inductive, and the λΠ example. Binary artifacts, module linking, and the SOAS and MLTT applications are outside the current port. Context membership and fresh-name allocation currently use lists. Runtime performance parity with Haskell has not been measured.
+Pass several syntax inductives as `derive_free_foil [SourceTerm, SourceType] with Pattern, Pattern.binders` to generate a shared signature for a family. Constructors can refer to any category in the family in ordinary or scoped positions. A constructor can also carry fixed payloads with decidable equality. The generated reverse conversions return `Option` and check the category of each node and child in the shared tree.
+
+## Second-order abstract syntax
+
+Import `FreeFoil.Examples.SOAS` to build the terms, types, and typing judgments with Lean constructors. `MetaSubst.fromNamed` checks the scope of each replacement and records its ordered parameters. `applySubsts` substitutes metavariable applications simultaneously, and `isSolutionFor` checks whether the resulting sides of each constraint match up to α-equivalence. The suite includes nested substitution and matching examples from the upstream SOAS doctests.
+
+The current port covers the core library and the λΠ and SOAS examples. Binary artifacts, module linking, and the MLTT application are outside the current port. Context membership and fresh-name allocation currently use lists. Runtime performance parity with Haskell has not been measured.

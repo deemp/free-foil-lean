@@ -1,4 +1,5 @@
 import FreeFoil.Examples.LambdaPi.Program
+import FreeFoil.Tests.SOAS
 import FreeFoil.Tests.SubstitutionLaws
 
 open FreeFoil
@@ -265,4 +266,5 @@ def main : IO Unit := do
   evaluationTests
   lambdaPiPatternTests
   lambdaPiProgramTests
+  FreeFoil.Tests.SOAS.run
   IO.println "Free Foil regression tests passed"
