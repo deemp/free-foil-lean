@@ -1,5 +1,5 @@
 ---
-id: TASK-1.1
+id: TASK-001.01
 title: Finish the λΠ example and interpreter
 status: Done
 assignee:
@@ -10,7 +10,7 @@ labels: []
 dependencies: []
 references:
   - plan.md
-parent_task_id: TASK-1
+parent_task_id: TASK-001
 type: feature
 ordinal: 2000
 ---

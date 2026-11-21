@@ -1,5 +1,5 @@
 ---
-id: TASK-1
+id: TASK-001
 title: Complete the Free Foil Lean port
 status: In Progress
 assignee: []
@@ -36,11 +36,11 @@ The Lean library already checks scopes and provides capture-avoiding substitutio
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Complete TASK-1.1 through TASK-1.7 in milestone order. TASK-1.8 covers generic substitution laws and can proceed independently.
+Complete TASK-001.01 through TASK-001.07 in milestone order. TASK-001.08 covers generic substitution laws and can proceed independently.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Split the port into eight subtasks. TASK-1.1 is done and verified, which unblocks TASK-1.2 (dependent telescopes and thinning).
+Split the port into eight subtasks. TASK-001.01 is done and verified, which unblocks TASK-001.02 (dependent telescopes and thinning).
 <!-- SECTION:NOTES:END -->

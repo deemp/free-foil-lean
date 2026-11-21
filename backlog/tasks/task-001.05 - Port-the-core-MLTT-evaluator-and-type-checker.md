@@ -1,15 +1,15 @@
 ---
-id: TASK-1.5
+id: TASK-001.05
 title: Port the core MLTT evaluator and type checker
 status: To Do
 assignee: []
 created_date: '2026-11-21T21:07:51Z'
 labels: []
 dependencies:
-  - TASK-1.4
+  - TASK-001.04
 references:
   - plan.md
-parent_task_id: TASK-1
+parent_task_id: TASK-001
 type: feature
 ordinal: 6000
 ---

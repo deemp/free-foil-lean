@@ -1,15 +1,15 @@
 ---
-id: TASK-1.2
+id: TASK-001.02
 title: Port dependent telescopes and thinning
 status: To Do
 assignee: []
 created_date: '2026-11-21T21:07:50Z'
 labels: []
 dependencies:
-  - TASK-1.1
+  - TASK-001.01
 references:
   - plan.md
-parent_task_id: TASK-1
+parent_task_id: TASK-001
 type: feature
 ordinal: 3000
 ---

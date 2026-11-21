@@ -1,5 +1,5 @@
 ---
-id: TASK-1.8
+id: TASK-001.08
 title: Prove generic substitution laws
 status: To Do
 assignee: []
@@ -8,7 +8,7 @@ labels: []
 dependencies: []
 references:
   - plan.md
-parent_task_id: TASK-1
+parent_task_id: TASK-001
 type: feature
 ordinal: 9000
 ---

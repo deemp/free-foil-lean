@@ -1,15 +1,15 @@
 ---
-id: TASK-1.6
+id: TASK-001.06
 title: Port MLTT module parameters and scope linking
 status: To Do
 assignee: []
 created_date: '2026-11-21T21:07:51Z'
 labels: []
 dependencies:
-  - TASK-1.5
+  - TASK-001.05
 references:
   - plan.md
-parent_task_id: TASK-1
+parent_task_id: TASK-001
 type: feature
 ordinal: 7000
 ---
