@@ -47,4 +47,10 @@ Import `FreeFoil` for the generic library. A `Signature` gives each operator an 
 - `AST.freeVars` computes the support, `AST.restrict` checks a smaller context, and `AST.fold` and `AST.hoist` support generic consumers and signature transformations.
 - `Telescope` stores labelled binders whose payloads can refer to earlier entries. `Telescope.rename` carries those references into the new scope, and `Telescope.thin` keeps the entries a term uses, including dependencies in their payloads.
 
-This port covers the core library and a λΠ example built directly in Lean. Upstream Template Haskell generators, binary artifacts and module linking, and the SOAS and MLTT applications are outside the current port. Context membership and fresh-name allocation currently use lists. Runtime performance parity with Haskell has not been measured.
+## Generate a signature from an inductive
+
+Import `FreeFoil.Derive` and declare an inductive for the named syntax, with a `var` constructor taking a `String`. Use the inductive itself for ordinary recursive positions and `BoundSyntax Pattern Pattern.binders YourInductive` for positions that extend scope. The binder carries its shape and names in binding order.
+
+The [λΠ example](FreeFoil/Examples/LambdaPi.lean) runs `derive_free_foil NamedTerm with Pattern, Pattern.binders` to generate `Op`, `sig`, `Raw`, and `Term` in its namespace. It also generates constructor helpers, a conversion between `NamedTerm` and `Raw`, and `NamedTerm.resolveClosed` to check scope. Constructor helpers for `Raw` take a binder and body separately at each scoped position.
+
+This port covers the core library, generation for a single unparameterized inductive, and the λΠ example. Binary artifacts, module linking, and the SOAS and MLTT applications are outside the current port. Context membership and fresh-name allocation currently use lists. Runtime performance parity with Haskell has not been measured.

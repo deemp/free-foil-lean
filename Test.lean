@@ -66,6 +66,26 @@ private def conversionTests : IO Unit := do
   | .error (.unbound "x") => pure ()
   | _ => throw (IO.userError "the Pi binder was visible in its domain")
 
+private def generatedSyntaxTests : IO Unit := do
+  let binder x y :=
+    Raw.pairPattern (Raw.varPattern x) (Raw.pairPattern Raw.wildcard (Raw.varPattern y))
+  let pi domain x y :=
+    NamedTerm.pi domain (BoundSyntax.ofBinder (binder x y) (.pair (.var x) (.var y)))
+  match (pi .univ "x" "x").resolveClosed with
+  | .error (.duplicateBinder ["x", "x"]) => pure ()
+  | _ => throw (IO.userError "generated conversion accepted a duplicate pattern name")
+  match (pi (.var "x") "x" "y").resolveClosed with
+  | .error (.unbound "x") => pure ()
+  | _ => throw (IO.userError "generated conversion made the Pi binder visible in its domain")
+  let term ← expectOk ((pi .univ "x" "y").resolveClosed)
+  let named := Term.toNamedTerm [] term (fun x => nomatch x.property)
+  match named with
+  | .pi .univ ⟨.pair .variable (.pair .wildcard .variable), [x, y], _, .pair (.var fst) (.var snd)⟩ =>
+    check "generated reverse conversion reordered the pattern names" (x == fst && y == snd && x != y)
+  | _ => throw (IO.userError "generated reverse conversion changed the Pi or its pattern")
+  check "generated conversion changed the term up to alpha-equivalence"
+    (term.alphaEquiv (← expectOk named.resolveClosed))
+
 private abbrev pairSig : Signature where
   Op := Unit
   Pattern := Bool
@@ -237,6 +257,7 @@ def main : IO Unit := do
   alphaTests
   captureTest
   conversionTests
+  generatedSyntaxTests
   patternTests
   telescopeTests
   openTelescopeTests

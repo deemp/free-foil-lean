@@ -53,16 +53,16 @@ private partial def pattern : Parser (Binder sig String) :=
     symbol ")"
     pure (Raw.pairPattern left right)
 
-private partial def term : Parser Raw :=
-  lambda <|> pi <|> projection "π₁" Raw.first <|> projection "π₂" Raw.second <|>
-    (symbol "𝕌" *> pure Raw.univ) <|> applicationOrProduct
+private partial def term : Parser NamedTerm :=
+  lambda <|> pi <|> projection "π₁" NamedTerm.first <|> projection "π₂" NamedTerm.second <|>
+    (symbol "𝕌" *> pure NamedTerm.univ) <|> applicationOrProduct
 where
-  lambda : Parser Raw := do
+  lambda : Parser NamedTerm := do
     symbol "λ"
     let binder ← pattern
     symbol "."
-    pure (Raw.lamPattern binder (← term))
-  pi : Parser Raw := do
+    pure (.lam (BoundSyntax.ofBinder binder (← term)))
+  pi : Parser NamedTerm := do
     symbol "Π"
     symbol "("
     let binder ← pattern
@@ -70,36 +70,36 @@ where
     let domain ← term
     symbol ")"
     symbol "→"
-    pure (Raw.piPattern binder domain (← term))
-  projection (name : String) (op : Raw → Raw) : Parser Raw := do
+    pure (.pi domain (BoundSyntax.ofBinder binder (← term)))
+  projection (name : String) (op : NamedTerm → NamedTerm) : Parser NamedTerm := do
     symbol name
     symbol "("
     let arg ← term
     symbol ")"
     pure (op arg)
-  operand : Parser Raw :=
-    (Raw.var <$> identifier) <|> do
+  operand : Parser NamedTerm :=
+    (NamedTerm.var <$> identifier) <|> do
       symbol "("
       let inner ← term
       symbol ")"
       pure inner
-  application (fn : Raw) : Parser Raw := do
+  application (fn : NamedTerm) : Parser NamedTerm := do
     let args ← many operand
-    pure (args.foldl Raw.app fn)
-  finishApplicationOrProduct (fn : Raw) : Parser Raw := do
+    pure (args.foldl NamedTerm.app fn)
+  finishApplicationOrProduct (fn : NamedTerm) : Parser NamedTerm := do
     let left ← application fn
     if let some _ ← optional (symbol "×") then
-      pure (Raw.product left (← application (← operand)))
+      pure (.product left (← application (← operand)))
     else
       pure left
-  applicationOrProduct : Parser Raw :=
-    (identifier >>= (finishApplicationOrProduct ∘ Raw.var)) <|> do
+  applicationOrProduct : Parser NamedTerm :=
+    (identifier >>= (finishApplicationOrProduct ∘ NamedTerm.var)) <|> do
       symbol "("
       let left ← term
       if let some _ ← optional (symbol ",") then
         let right ← term
         symbol ")"
-        pure (Raw.pair left right)
+        pure (.pair left right)
       else
         symbol ")"
         finishApplicationOrProduct left
@@ -111,10 +111,10 @@ private def command : Parser Command := do
   symbol ":"
   let type ← term
   let _ ← optional (symbol ";")
-  pure (make value type)
+  pure (make value.toRaw type.toRaw)
 
 def parseTerm (input : String) : Except String Raw :=
-  (trivia *> term <* eof).run input
+  (trivia *> (NamedTerm.toRaw <$> term) <* eof).run input
 
 def parseProgram (input : String) : Except String (Array Command) :=
   (trivia *> many command <* eof).run input
@@ -131,29 +131,25 @@ private def renderPattern (shape : Pattern) (names : List String) : String × Li
     let (snd, rest) := renderPattern right rest
     (s!"({fst}, {snd})", rest)
 
-private def renderTerm (prec : Nat) (value : Raw) : String :=
+private def renderTerm (prec : Nat) (value : NamedTerm) : String :=
   let paren (own : Nat) (text : String) := if prec > own then s!"({text})" else text
   match value with
   | .var name => name
-  | .node op terms binders bodies =>
-    match op with
-    | .app => paren 1 s!"{renderTerm 1 (terms 0)} {renderTerm 2 (terms 1)}"
-    | .lam =>
-      let binder := binders 0
-      let pat := (renderPattern binder.shape binder.names).1
-      paren 0 s!"λ {pat}. {renderTerm 0 (bodies 0)}"
-    | .pi =>
-      let binder := binders 0
-      let pat := (renderPattern binder.shape binder.names).1
-      paren 0 s!"Π ({pat} : {renderTerm 0 (terms 0)}) → {renderTerm 0 (bodies 0)}"
-    | .univ => paren 0 "𝕌"
-    | .pair => paren 0 s!"({renderTerm 0 (terms 0)}, {renderTerm 0 (terms 1)})"
-    | .first => paren 0 s!"π₁({renderTerm 0 (terms 0)})"
-    | .second => paren 0 s!"π₂({renderTerm 0 (terms 0)})"
-    | .product => paren 0 s!"{renderTerm 1 (terms 0)} × {renderTerm 1 (terms 1)}"
+  | .app fn arg => paren 1 s!"{renderTerm 1 fn} {renderTerm 2 arg}"
+  | .lam ⟨shape, names, _, body⟩ =>
+    let pat := (renderPattern shape names).1
+    paren 0 s!"λ {pat}. {renderTerm 0 body}"
+  | .pi domain ⟨shape, names, _, codomain⟩ =>
+    let pat := (renderPattern shape names).1
+    paren 0 s!"Π ({pat} : {renderTerm 0 domain}) → {renderTerm 0 codomain}"
+  | .univ => paren 0 "𝕌"
+  | .pair fst snd => paren 0 s!"({renderTerm 0 fst}, {renderTerm 0 snd})"
+  | .first term => paren 0 s!"π₁({renderTerm 0 term})"
+  | .second term => paren 0 s!"π₂({renderTerm 0 term})"
+  | .product fst snd => paren 0 s!"{renderTerm 1 fst} × {renderTerm 1 snd}"
 termination_by structural value
 
-def prettyTerm (value : Raw) : String := renderTerm 0 value
+def prettyTerm (value : Raw) : String := renderTerm 0 (NamedTerm.fromRaw value)
 
 inductive InterpretError where
   | scope (error : ResolveError String)
@@ -174,6 +170,6 @@ def interpret (fuel : Nat) (command : Command) : Except InterpretError String :=
   | .compute value _ =>
     let term ← (AST.fromClosed value).mapError .scope
     let result ← (whnf [] fuel term).mapError .evaluation
-    pure (prettyTerm (result.toNamed [] fun x => nomatch x.property))
+    pure (renderTerm 0 (Term.toNamedTerm [] result fun x => nomatch x.property))
 
 end FreeFoil.Examples.LambdaPi
