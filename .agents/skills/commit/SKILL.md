@@ -28,10 +28,10 @@ Harness: <harness>
 Model: <model>
 ```
 
-Replace the placeholders with the actual harness name and model identifier
-for the session that authored the commit message. Use verified session
-information and ask for any value you cannot verify. Keep the `Model:` line
-last.
+From the repository root, run `python3 scripts/commit-metadata.py` to get
+both lines from the active Codex session. If discovery fails, use other
+verified session information and ask for any value you cannot verify. Keep
+the `Model:` line last.
 
 ## Create the commit
 
