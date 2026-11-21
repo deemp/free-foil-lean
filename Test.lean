@@ -1,0 +1,121 @@
+import FreeFoil.Examples.LambdaPi
+
+open FreeFoil
+open FreeFoil.Examples.LambdaPi
+
+example (x : Name []) : False := by
+  have h := x.property
+  simp at h
+
+example (term : AST sig source) (h : source ⊆ target) :
+    (term.sink h).syntaxTree = term.syntaxTree := rfl
+
+private def check (message : String) (condition : Bool) : IO Unit :=
+  unless condition do throw (IO.userError message)
+
+private def expectOk [Repr ε] (result : Except ε α) : IO α :=
+  match result with
+  | .ok value => pure value
+  | .error error => throw (IO.userError (reprStr error))
+
+private def closed (term : Raw) : IO (Term []) := expectOk (AST.fromClosed term)
+
+private def alphaTests : IO Unit := do
+  let shadowed ← closed (Raw.lam "x" (Raw.lam "x" (Raw.var "x")))
+  let inner ← closed (Raw.lam "a" (Raw.lam "b" (Raw.var "b")))
+  let outer ← closed (Raw.lam "a" (Raw.lam "b" (Raw.var "a")))
+  check "renaming a shadowed binder changed alpha-equivalence" (shadowed.alphaEquiv inner)
+  check "alpha-equivalence confused the inner and outer binders" (!shadowed.alphaEquiv outer)
+  let universeTerm ← closed Raw.univ
+  let pair ← closed (Raw.pair Raw.univ Raw.univ)
+  let product ← closed (Raw.product Raw.univ Raw.univ)
+  check "different operators were matched" (!pair.alphaEquiv product)
+  let wildcard ← closed (Raw.lamWildcard Raw.univ)
+  let namedBinder ← closed (Raw.lam "x" Raw.univ)
+  check "different pattern shapes were matched" (!wildcard.alphaEquiv namedBinder)
+  let hoisted := universeTerm.hoist (dst := sig) (fun shape => ⟨shape, rfl⟩) AST.node
+  check "identity hoist changed the term" (hoisted.alphaEquiv universeTerm)
+
+private def captureTest : IO Unit := do
+  let fn ← closed (Raw.lam "x" (Raw.lam "y" (Raw.var "x")))
+  let scope : Scope := [1]
+  let y : Name scope := ⟨1, by simp [scope]⟩
+  let fn := fn.sink (by simp)
+  let term : Term scope := AST.node .app (Fin.cases fn fun _ => AST.var y) Fin.elim0
+  let result ← expectOk (whnf scope 10 term)
+  let resolve (name : String) := if name == "y" then some y else none
+  let expected ← expectOk (AST.fromNamed scope resolve (Raw.lam "z" (Raw.var "y")))
+  check "substitution captured the free argument" (result.alphaEquiv expected)
+  check "substitution lost the free identifier" (result.freeVars == [1])
+  check "restrict accepted a context missing a free name" (result.restrict []).isNone
+  check "restrict rejected a context containing the support" (result.restrict [1]).isSome
+  let normalized := AST.refresh scope result
+  check "forced refresh changed the meaning of the term" (result.alphaEquiv normalized)
+
+private def conversionTests : IO Unit := do
+  let scope : Scope := [0]
+  let x : Name scope := ⟨0, by simp [scope]⟩
+  let resolve (name : String) := if name == "x1" then some x else none
+  let raw := Raw.pi "y" (Raw.var "x1") (Raw.pair (Raw.var "y") (Raw.var "x1"))
+  let term ← expectOk (AST.fromNamed scope resolve raw)
+  let printed := AST.toNamed scope term (fun _ => "x1")
+  let roundTrip ← expectOk (AST.fromNamed scope resolve printed)
+  check "printing used a free name for a binder" (term.alphaEquiv roundTrip)
+  let bad := Raw.pi "x" (Raw.var "x") (Raw.var "x")
+  match AST.fromClosed bad with
+  | .error (.unbound "x") => pure ()
+  | _ => throw (IO.userError "the Pi binder was visible in its domain")
+
+private abbrev pairSig : Signature where
+  Op := Unit
+  Pattern := Bool
+  terms _ := 0
+  scopes _ := 1
+  binders _ := 2
+
+private def bindsPair (shape : Bool) (x y used : String) : Syntax pairSig String :=
+  .node () Fin.elim0 (fun _ => ⟨shape, [x, y], rfl⟩) (fun _ => .var used)
+
+private def patternTests : IO Unit := do
+  let pair ← expectOk (AST.fromClosed (bindsPair false "x" "y" "y"))
+  let renamed ← expectOk (AST.fromClosed (bindsPair false "a" "b" "b"))
+  let different ← expectOk (AST.fromClosed (bindsPair false "a" "b" "a"))
+  let differentShape ← expectOk (AST.fromClosed (bindsPair true "a" "b" "b"))
+  check "renaming a multi-name pattern changed its meaning" (pair.alphaEquiv renamed)
+  check "pattern binding positions were ignored" (!pair.alphaEquiv different)
+  check "pattern payloads were ignored" (!pair.alphaEquiv differentShape)
+  match AST.fromClosed (bindsPair false "x" "x" "x") with
+  | .error (.duplicateBinder _) => pure ()
+  | _ => throw (IO.userError "duplicate pattern names were accepted")
+  let invalid : Syntax pairSig Nat :=
+    .node () Fin.elim0 (fun _ => ⟨false, [0, 0], rfl⟩) (fun _ => .var 0)
+  check "numeric scope checking accepted a duplicate binder" (AST.ofSyntax [] invalid).isNone
+  match pair.view with
+  | .node _ _ children =>
+    let child := children 0
+    let result := child.instantiate [8, 9] (.weakening (by simp)) fun i =>
+      if i.val == 0 then AST.var ⟨8, by simp⟩ else AST.var ⟨9, by simp⟩
+    check "pattern arguments were substituted out of order" (result.freeVars == [9])
+  | .var _ => throw (IO.userError "expected a scoped pattern")
+
+private def evaluationTests : IO Unit := do
+  let term ← closed (Raw.second (Raw.pair (Raw.lam "x" (Raw.var "x")) Raw.univ))
+  let expected ← closed Raw.univ
+  let result ← expectOk (whnf [] 10 term)
+  check "projection failed to reduce" (result.alphaEquiv expected)
+  let wildcard ← closed (Raw.app (Raw.lamWildcard Raw.univ) (Raw.lam "x" (Raw.var "x")))
+  let result ← expectOk (whnf [] 10 wildcard)
+  check "wildcard beta reduction failed" (result.alphaEquiv expected)
+  let self := Raw.lam "x" (Raw.app (Raw.var "x") (Raw.var "x"))
+  let omega ← closed (Raw.app self self)
+  match whnf [] 8 omega with
+  | .error .outOfFuel => pure ()
+  | .ok _ => throw (IO.userError "a diverging term returned a weak-head normal form")
+
+def main : IO Unit := do
+  alphaTests
+  captureTest
+  conversionTests
+  patternTests
+  evaluationTests
+  IO.println "Free Foil regression tests passed"
