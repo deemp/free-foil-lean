@@ -59,4 +59,13 @@ Pass several syntax inductives as `derive_free_foil [SourceTerm, SourceType] wit
 
 Import `FreeFoil.Examples.SOAS` to build the terms, types, and typing judgments with Lean constructors. `MetaSubst.fromNamed` checks the scope of each replacement and records its ordered parameters. `applySubsts` substitutes metavariable applications simultaneously, and `isSolutionFor` checks whether the resulting sides of each constraint match up to α-equivalence. The suite includes nested substitution and matching examples from the upstream SOAS doctests.
 
-The current port covers the core library and the λΠ and SOAS examples. Binary artifacts, module linking, and the MLTT application are outside the current port. Context membership and fresh-name allocation currently use lists. Runtime performance parity with Haskell has not been measured.
+## Run standalone MLTT
+
+```sh
+lake exe mltt test/fixtures/mltt/core.mltt
+lake exe mltt - < test/fixtures/mltt/core.mltt
+```
+
+The interpreter runs the `def`, `check`, and `compute` commands of a standalone program. `compute` infers a type and then fully normalizes the term. The core includes dependent functions and pairs, recursive pair patterns, unit, and identity types with `refl` and `J`. The core follows upstream in using one universe with type-in-type and reports fuel exhaustion when reduction or type checking exceeds its recursion budget. Module parameters, linking, and checked artifacts are later milestones.
+
+The test suite runs [the unchanged upstream core fixture](https://github.com/fizruk/free-foil/blob/fdfbeef/haskell/mltt/examples/core.mltt), distributed under the [upstream MLTT license](test/fixtures/mltt/LICENSE).
