@@ -22,4 +22,4 @@ Match nearby modules for indentation, naming, imports, and proof layout. For a p
 
 ## Commits and Pull Requests
 
-Review recent subjects with `git log -12 --oneline` once history is available. Use a concise subject that names the change. In the pull request, explain what changed and why, list the checks you ran, and link the relevant issue when one exists.
+Review recent subjects with `git log -12 --oneline` once history is available. Follow the [commit skill](.agents/skills/commit/SKILL.md) for every commit message. In the pull request, explain what changed and why, list the checks you ran, and link the relevant issue when one exists.
