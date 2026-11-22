@@ -59,6 +59,8 @@ Pass several syntax inductives as `derive_free_foil [SourceTerm, SourceType] wit
 
 Import `FreeFoil.Examples.SOAS` to build the terms, types, and typing judgments with Lean constructors. `MetaSubst.fromNamed` checks the scope of each replacement and records its ordered parameters. `applySubsts` substitutes metavariable applications simultaneously, and `isSolutionFor` checks whether the resulting sides of each constraint match up to α-equivalence. The suite includes nested substitution and matching examples from the upstream SOAS doctests.
 
+Use `solvePatterns` on equations whose metavariables take distinct variables from the constraint parameters or enclosing binders. Each metavariable has a fixed arity. The solver aligns binders by position and can introduce fresh metavariables when flexible terms share only some of their arguments. For example, solving `?F[x] = f(x)` gives a replacement that applies `f` to the argument of `?F`. A successful `PatternSolution` includes the simultaneous substitution and a Lean proof that `isSolutionFor` accepts it. Repeated or non-variable arguments return `PatternError.nonPattern`. The optional fuel argument bounds the number of worklist steps.
+
 ## Run standalone MLTT
 
 ```sh

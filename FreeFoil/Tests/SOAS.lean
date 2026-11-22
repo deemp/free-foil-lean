@@ -99,6 +99,83 @@ private def constraintFixtures : IO Unit := do
   check "SOAS matching ignored the metavariable identifier"
     (!(← expectOk (isSolutionFor [] [otherMetavariable])))
 
+private def unary (operator : String) (argument : NamedTerm) : NamedTerm :=
+  NamedTerm.operator operator [.plain argument]
+
+private def scopedLam (id : Nat) (body : Term (id :: scope)) : Term scope :=
+  let binder : Binder sig Nat := ⟨1, [id], rfl⟩
+  let scopedArg := Term.NamedArg.bound ⟨binder, by simp [binder], body⟩
+  Term.NamedTerm.application "Lam" (Term.NamedArgs.cons scopedArg Term.NamedArgs.nil)
+
+private def patternSolutions : IO Unit := do
+  let x := NamedTerm.var "x"
+  let y := NamedTerm.var "y"
+  let z := NamedTerm.var "z"
+  let unaryEquation ← expectOk (Constraint.fromNamed ["x"] (mv "?F" [x]) (unary "f" x))
+  let unarySolution ← expectOk (solvePatterns [unaryEquation])
+  let image ← expectOk (applySubsts unaryEquation.scope unarySolution.substitutions unaryEquation.left)
+  check "SOAS did not solve the unary pattern equation" (matchTerms image unaryEquation.right)
+
+  let first ← expectOk (Constraint.fromNamed ["x"] (mv "?F" [x]) (unary "f" (mv "?G" [x])))
+  let underBinder ← expectOk (NamedTerm.resolve [4] (fun _ => some ⟨4, by simp⟩) (mv "?G" [x]))
+  let second : Constraint := ⟨[], scopedLam 4 underBinder, scopedLam 7 (.var ⟨7, by simp⟩)⟩
+  let composed ← expectOk (solvePatterns [first, second])
+  check "SOAS failed to align renamed binders and compose its assignments"
+    (← expectOk (isSolutionFor composed.substitutions [unaryEquation]))
+
+  let flexFlex ← expectOk (Constraint.fromNamed ["x", "y", "z"]
+    (mv "?F" [x, y]) (mv "?G" [y, z]))
+  let specialize ← expectOk (Constraint.fromNamed ["y", "z"] (mv "?G" [y, z]) (unary "f" y))
+  let freshNameCollision ← expectOk (Constraint.fromNamed [] (mv "?pattern0" []) zero)
+  let shared ← expectOk (solvePatterns [flexFlex, specialize, freshNameCollision])
+  let projected ← expectOk (Constraint.fromNamed ["x", "y"] (mv "?F" [x, y]) (unary "f" y))
+  check "SOAS lost the shared parameter during flexible unification"
+    (← expectOk (isSolutionFor shared.substitutions [projected]))
+
+  let permutation ← expectOk (Constraint.fromNamed ["x", "y"] (mv "?F" [x, y]) (mv "?F" [y, x]))
+  let projected ← expectOk (solvePatterns [permutation])
+  check "SOAS left a permuted flexible head unsolved"
+    (projected.substitutions.any (·.name == "?F"))
+
+  let prune ← expectOk (Constraint.fromNamed ["x", "y"]
+    (mv "?F" [x]) (lam "a" (mv "?H" [y, .var "a"])))
+  let useLocal ← expectOk (Constraint.fromNamed ["y", "a"] (mv "?H" [y, .var "a"]) (unary "g" (.var "a")))
+  let scopedSolution ← expectOk (solvePatterns [prune, useLocal])
+  let expected ← expectOk (Constraint.fromNamed ["x"] (mv "?F" [x]) (lam "b" (unary "g" (.var "b"))))
+  check "SOAS pruned a variable bound inside the assignment"
+    (← expectOk (isSolutionFor scopedSolution.substitutions [expected]))
+
+private def patternFailures : IO Unit := do
+  let x := NamedTerm.var "x"
+  let alias ← expectOk (Constraint.fromNamed ["x"] (mv "?F" [x]) (mv "?G" [x]))
+  let cycle ← expectOk (Constraint.fromNamed ["x"] (mv "?G" [x]) (unary "f" (mv "?F" [x])))
+  match solvePatterns [alias, cycle] with
+  | .error (.cyclic "?G") => pure ()
+  | _ => throw (IO.userError "SOAS accepted a cyclic assignment")
+
+  let underBinder ← expectOk (NamedTerm.resolve [0, 0] (fun _ => some ⟨0, by simp⟩) (mv "?F" [x]))
+  let capture : Constraint := ⟨[0], scopedLam 0 underBinder, scopedLam 7 (.var ⟨0, by simp⟩)⟩
+  match solvePatterns [capture] with
+  | .error (.escapingVariable "?F" 0) => pure ()
+  | _ => throw (IO.userError "SOAS captured a free variable when aligning a shadowing binder")
+
+  let mismatch ← expectOk (Constraint.fromNamed ["x"] (unary "f" x) (unary "g" x))
+  match solvePatterns [mismatch] with
+  | .error .rigidMismatch => pure ()
+  | _ => throw (IO.userError "SOAS accepted a rigid mismatch")
+
+  for arguments in [[unary "f" x], [x, x]] do
+    let invalid := mv "?F" arguments
+    let reflexive ← expectOk (Constraint.fromNamed ["x"] invalid invalid)
+    match solvePatterns [reflexive] with
+    | .error (.nonPattern "?F") => pure ()
+    | _ => throw (IO.userError "SOAS did not distinguish an application outside the pattern fragment")
+
+  let inconsistent ← expectOk (Constraint.fromNamed ["x"] (mv "?F" [x]) (mv "?F" []))
+  match solvePatterns [inconsistent] with
+  | .error (.arityMismatch "?F" 1 0) => pure ()
+  | _ => throw (IO.userError "SOAS accepted inconsistent metavariable arities")
+
 private def soasCodecs : IO Unit := do
   let source : NamedTyping :=
     .judgment (lam "x" (.var "x")) (.function (.var "a") (.product (.var "a") (.var "a")))
@@ -150,6 +227,8 @@ end MutualCodec
 def run : IO Unit := do
   substitutionFixtures
   constraintFixtures
+  patternSolutions
+  patternFailures
   soasCodecs
   MutualCodec.run
 
