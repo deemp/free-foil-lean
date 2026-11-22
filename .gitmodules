@@ -1,0 +1,3 @@
+[submodule "free-foil"]
+	path = free-foil
+	url = https://github.com/fizruk/free-foil
