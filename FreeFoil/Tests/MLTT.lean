@@ -219,6 +219,93 @@ private def importResolutionTests : IO Unit := do
   let (_, results) ← expectOk (checkModule env ⟨4, 5⟩ parameter)
   verify "an import collision hid a parameter" (results == #[.defined "value"])
 
+private def loadEncoded (env : CheckedModules) (artifact : ModuleArtifact) :
+    Except String CheckedModules := do
+  loadArtifact env (← decodeArtifact (encodeArtifact artifact))
+
+private def updateArtifactDeclaration (artifact : ModuleArtifact) (index : Nat)
+    (update : ArtifactDeclaration → ArtifactDeclaration) : ModuleArtifact :=
+  let declarations := artifact.payload.declarations.modify index update
+  { artifact with payload := { artifact.payload with declarations } }
+
+private def setArtifactValue (artifact : ModuleArtifact) (value : Lean.Json) : ModuleArtifact :=
+  updateArtifactDeclaration artifact 0 fun decl => { decl with value }
+
+private def artifactTests : IO Unit := do
+  let common ← singleModule "module Common def U : 𝕌 := 𝟙 def base : U := tt"
+  let left ← singleModule "module Left (x : U) import Common\n\
+    def choose : U := x\n\
+    def again : U := choose\n\
+    def base : U := Common.base"
+  let right ← singleModule "module Right import Common\n\
+    def rotate : (𝕌 × (𝕌 × 𝕌)) → (𝕌 × (𝕌 × 𝕌)) := λ (A, (B, C)) ⇒ (C, (A, B))"
+  let client ← singleModule "module Client import Left import Right\n\
+    compute Left.again Left.base\n\
+    compute π₁ (Right.rotate (𝟙, (𝕌, Id(𝟙, tt, tt))))\n\
+    compute π₁ (π₂ (Right.rotate (𝟙, (𝕌, Id(𝟙, tt, tt)))))\n\
+    compute π₂ (π₂ (Right.rotate (𝟙, (𝕌, Id(𝟙, tt, tt)))))"
+  let (base, _) ← expectOk (checkModule .empty ⟨0, 10⟩ common)
+  let (checkedLeft, _) ← expectOk (checkModule base ⟨100, 110⟩ left)
+  let (checkedRight, _) ← expectOk (checkModule base ⟨20, 30⟩ right)
+  let baseArtifact ← expectOk (makeArtifact base "Common")
+  let leftArtifact ← expectOk (makeArtifact checkedLeft "Left")
+  let rightArtifact ← expectOk (makeArtifact checkedRight "Right")
+  let restoredBase ← expectOk (loadEncoded .empty baseArtifact)
+  let restoredLeft ← expectOk (loadEncoded restoredBase leftArtifact)
+  let restoredRight ← expectOk (loadEncoded restoredBase rightArtifact)
+  let linked ← expectOk (linkModules restoredLeft restoredRight)
+  let (_, results) ← expectOk (checkModule linked ⟨200, 210⟩ client)
+  verify "an artifact round trip changed the client computations or nested binder order"
+    (results == #[.computed "tt", .computed "Id(𝟙, tt, tt)", .computed "𝟙", .computed "𝕌"])
+  let _ ← expectOk (linkModules restoredLeft checkedLeft)
+  for artifact in [baseArtifact, leftArtifact, rightArtifact] do
+    let stored ← expectOk (makeArtifact linked artifact.payload.name)
+    verify "re-export changed the artifact of a loaded declaration"
+      (encodeArtifact stored == encodeArtifact artifact)
+
+  let foreignMod ← singleModule "module Foreign def secret : 𝟙 := tt"
+  let (expanded, _) ← expectOk (checkModule restoredBase ⟨400, 410⟩ foreignMod)
+  let (checkedExpanded, _) ← expectOk (checkModule expanded ⟨100, 110⟩ left)
+  let expandedArtifact ← expectOk (makeArtifact checkedExpanded "Left")
+  verify "unrelated declarations affected artifact bytes"
+    (encodeArtifact expandedArtifact == encodeArtifact leftArtifact)
+  let _ ← expectOk (loadEncoded expanded leftArtifact)
+
+  expectError "missing dependency 'Common'" (loadEncoded .empty leftArtifact)
+  let changed ← singleModule "module Common def U : 𝕌 := 𝟙 def base : U := (tt : U)"
+  let (changedBase, _) ← expectOk (checkModule .empty ⟨0, 10⟩ changed)
+  expectError "dependency manifest" (loadEncoded changedBase leftArtifact)
+  let (changedLeft, _) ← expectOk (checkModule changedBase ⟨100, 110⟩ left)
+  let child ← singleModule "module Child import Left def exposed : 𝟙 := Left.base"
+  let (checkedChild, _) ← expectOk (checkModule checkedLeft ⟨300, 310⟩ child)
+  let childArtifact ← expectOk (makeArtifact checkedChild "Child")
+  expectError "dependency manifest" (loadEncoded changedLeft childArtifact)
+
+  let global (id : Nat) := Lean.Json.arr #[.str "free", Lean.toJson id]
+  expectError "unavailable global identifier 1"
+    (loadEncoded checkedLeft (setArtifactValue childArtifact (global 1)))
+  expectError "unavailable global identifier 101"
+    (loadEncoded restoredBase (setArtifactValue leftArtifact (global 101)))
+  expectError "unavailable global identifier 400"
+    (loadEncoded expanded (setArtifactValue leftArtifact (global 400)))
+  expectError "unbound lexical level 0"
+    (loadEncoded restoredBase (setArtifactValue leftArtifact (.arr #[.str "bound", Lean.toJson (0 : Nat)])))
+  let noChildren := Lean.Json.arr #[.str "node", Lean.toJson Op.lam, .arr #[], .arr #[]]
+  expectError "wrong scoped child arity" (loadEncoded restoredBase (setArtifactValue leftArtifact noChildren))
+  let wrongType := Lean.Json.arr #[.str "node", Lean.toJson Op.univ, .arr #[], .arr #[]]
+  expectError "expected type" (loadEncoded checkedLeft (setArtifactValue childArtifact wrongType))
+  let badId := updateArtifactDeclaration leftArtifact 1 fun decl => { decl with id := 100 }
+  expectError "invalid declaration identifier" (loadEncoded restoredBase badId)
+  let badRange := { leftArtifact with payload := { leftArtifact.payload with range := ⟨110, 100⟩ } }
+  expectError "invalid reserved name range" (loadEncoded restoredBase badRange)
+  let shortRange := { leftArtifact with payload := { leftArtifact.payload with range := ⟨100, 101⟩ } }
+  expectError "invalid declaration identifier" (loadEncoded restoredBase shortRange)
+  let (blocker, _) ← expectOk (checkModule restoredBase ⟨109, 111⟩ foreignMod)
+  expectError "reserved name ranges overlap" (loadEncoded blocker leftArtifact)
+  expectError "duplicate module 'Left'" (loadEncoded restoredLeft leftArtifact)
+  expectError "unsupported MLTT artifact version"
+    (decodeArtifact ((encodeArtifact leftArtifact).replace "\"version\":1" "\"version\":2"))
+
 def run : IO Unit := do
   bidirectionalTests
   conversionTests
@@ -227,5 +314,6 @@ def run : IO Unit := do
   parameterTests
   moduleLinkTests
   importResolutionTests
+  artifactTests
 
 end FreeFoil.Tests.MLTT

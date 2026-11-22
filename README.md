@@ -83,3 +83,9 @@ An import exposes each declaration by its bare name and by its module-qualified 
 Lean clients can call `checkModule` with a half-open `NameRange`. The function allocates declaration identifiers in source order. Use `linkModules` to combine separately checked environments, including branches with a shared dependency. Linking widens the declaration scopes while retaining their identifiers and rejects overlapping reservations or conflicting copies of the same module.
 
 The parameter example is the [unchanged upstream fixture](https://github.com/fizruk/free-foil/blob/fdfbeef/haskell/mltt/examples/parameters.mltt).
+
+## Save and load checked MLTT modules
+
+Import `FreeFoil.Examples.MLTT` to use artifacts from Lean. Call `makeArtifact` on a checked environment and module name, then use `encodeArtifact` to produce a versioned JSON string for storage. Read it with `decodeArtifact` and call `loadArtifact` with the module's dependencies already checked or loaded. The restored module retains its declaration identifiers and can be linked or imported like a module checked from source.
+
+Loading verifies dependency checksums and reservations, resolves bound references and free declaration identifiers, and type-checks declarations in order. The artifact preserves a module's discharged declarations and their imports. It records global identifiers at their existing reservations and uses lexical levels for local binders.

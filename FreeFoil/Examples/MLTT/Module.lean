@@ -189,6 +189,20 @@ private def importedNames (env : CheckedModules) (imports : Array String) :
     pure <| mod.declarations.flatMap fun decl =>
       [(decl.name, decl.key), (s!"{name}.{decl.name}", decl.key)]
 
+private def checkReservation (env : CheckedModules) (name : String) (range : NameRange) :
+    Except String Unit := do
+  unless range.start < range.stop do
+    throw s!"invalid reserved name range for module '{name}'"
+  if (env.find? name).isSome then
+    throw s!"duplicate module '{name}'"
+  if let some other := env.modules.find? (range.overlaps ·.range) then
+    throw s!"reserved name ranges overlap for modules '{name}' and '{other.name}'"
+
+private def ModuleState.finish (env : CheckedModules) (state : ModuleState env.scope)
+    (name : String) (range : NameRange) (imports : Array String) : CheckedModules :=
+  let checked := ⟨name, range, imports, state.declarations.reverse⟩
+  ⟨state.scope, state.context, checked :: env.modules.map (·.sink state.outer)⟩
+
 private def runModuleCommand (state : ModuleState base) (mod : Module) (range : NameRange)
     (params : ParamTelescope base inner) (imports : NameTable base) (fuel : Nat)
     (command : Command) : Except String (ModuleState base × CommandResult) := do
@@ -240,12 +254,7 @@ private def runModuleCommand (state : ModuleState base) (mod : Module) (range : 
 are visible in source. A failed command does not publish a partially checked module. -/
 def checkModule (env : CheckedModules) (range : NameRange) (mod : Module) (fuel : Nat := 1024) :
     Except String (CheckedModules × Array CommandResult) := do
-  unless range.start < range.stop do
-    throw s!"invalid reserved name range for module '{mod.name}'"
-  if (env.find? mod.name).isSome then
-    throw s!"duplicate module '{mod.name}'"
-  if let some other := env.modules.find? (range.overlaps ·.range) then
-    throw s!"reserved name ranges overlap for modules '{mod.name}' and '{other.name}'"
+  checkReservation env mod.name range
   let imports ← importedNames env mod.imports
   let labels := mod.parameters.toList.map Parameter.name
   unless labels.Nodup do
@@ -258,8 +267,70 @@ def checkModule (env : CheckedModules) (range : NameRange) (mod : Module) (fuel 
       fun error => s!"module '{mod.name}', command {i.val + 1}: {error}"
     state := next
     results := results.push result
-  let checked := ⟨mod.name, range, mod.imports, state.declarations.reverse⟩
-  pure (⟨state.scope, state.context, checked :: env.modules.map (·.sink state.outer)⟩, results)
+  pure (state.finish env mod.name range mod.imports, results)
+
+/-- Separate stored global identifiers from lexical binding levels, even at the same number. -/
+inductive StoredName where
+  | global (id : Nat)
+  | bound (level : Nat)
+  deriving DecidableEq
+
+/-- An unchecked declaration with module parameters already represented by binders. -/
+structure StoredDeclaration where
+  name : String
+  id : Nat
+  parameters : List String
+  type : Syntax sig StoredName
+  value : Syntax sig StoredName
+
+private def hasParameterPrefix (type : Term typeScope) (value : Term valueScope) :
+    List String → Bool
+  | [] => true
+  | _ :: rest =>
+    match type.view, value.view with
+    | .node .pi _ codomains, .node .lam _ bodies =>
+      let codomain := codomains 0
+      let body := bodies 0
+      codomain.binder.shape == .variable && body.binder.shape == .variable &&
+        hasParameterPrefix codomain.body body.body rest
+    | _, _ => false
+
+private def restoreDeclaration (state : ModuleState base) (range : NameRange)
+    (importIds : List Nat) (fuel : Nat) (decl : StoredDeclaration) :
+    Except String (ModuleState base) := do
+  if state.declarations.any (·.name == decl.name) then
+    throw s!"duplicate definition '{decl.name}'"
+  unless decl.id == range.start + state.declarations.length && decl.id < range.stop do
+    throw s!"invalid declaration identifier {decl.id}"
+  let resolve : StoredName → Option (Name state.scope)
+    | .global id =>
+      if importIds.contains id || state.declarations.any (·.key.id == id) then
+        Name.ofId state.scope id
+      else none
+    | .bound _ => none
+  let restore raw := (AST.fromNamed state.scope resolve raw).mapError fun
+    | .unbound (.global id) => s!"unavailable global identifier {id}"
+    | .unbound (.bound level) => s!"unbound lexical level {level}"
+    | .duplicateBinder _ => "duplicate name in binder pattern"
+  let type ← restore decl.type
+  let value ← restore decl.value
+  unless decl.parameters.Nodup && hasParameterPrefix type value decl.parameters do
+    throw "invalid discharged parameters"
+  (checkDefinition state.context fuel type value).mapError toString
+  state.extend range decl.name decl.parameters type value
+
+/-- Recheck stored declarations in allocation order. Only direct imports and preceding
+declarations can supply a free identifier. Publish the module after every check succeeds. -/
+def checkStoredModule (env : CheckedModules) (name : String) (range : NameRange)
+    (imports : Array String) (declarations : Array StoredDeclaration) (fuel : Nat := 1024) :
+    Except String CheckedModules := do
+  checkReservation env name range
+  let importIds := (← importedNames env imports).map fun (_, key) => key.id
+  let mut state : ModuleState env.scope := ⟨env.scope, fun {_} mem => mem, env.context, []⟩
+  for decl in declarations do
+    state ← (restoreDeclaration state range importIds fuel decl).mapError
+      fun error => s!"module '{name}', declaration '{decl.name}': {error}"
+  pure (state.finish env name range imports)
 
 /-- Check a file's modules in dependency order, reserving a range per module in source order. -/
 def runModules (modules : Array Module) (fuel : Nat := 1024) :

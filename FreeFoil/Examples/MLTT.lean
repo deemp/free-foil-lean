@@ -1,1 +1,1 @@
-import FreeFoil.Examples.MLTT.Module
+import FreeFoil.Examples.MLTT.Artifact
