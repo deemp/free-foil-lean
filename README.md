@@ -59,6 +59,30 @@ open FreeFoil FreeFoil.Examples.LambdaPi
 -- some ("λ x0. (λ x1. x1) x0", "λ x0. x0")
 ```
 
+`NbE.conv` compares semantic values directly. Use `NbE.convertible` for
+scope-checked terms and `NbE.convertibleUnder` for terms with separate semantic
+environments. Matching heads compare children on demand without reading back
+the values. Languages can enable η comparison by supplying observers for
+introduction forms. The λΠ demo observes a function by applying it to a fresh
+variable, and the pairs demo observes a pair with its projections. Ordinary
+normalization preserves these introduction forms.
+
+```lean
+import FreeFoil.Examples.NbEDemos.Program
+
+open FreeFoil FreeFoil.Examples.NbEDemos
+
+#eval (do
+  let names ← (OpenNames.ofList ["f"]).toOption
+  let resolve source := do
+    let raw ← (lambdaPi.parse source).toOption
+    (names.resolve raw).toOption
+  let expanded ← resolve "\\x. f x"
+  let neutral ← resolve "f"
+  (NbE.convertible lambdaPi.rules 64 () expanded neutral).toOption : Option Bool)
+-- some true
+```
+
 The `nbe` executable reads one named term and prints its full normal form. Supply
 any free variable names after the term. The λΠ, lambda-let, pairs, and naturals
 commands use the syntax from the pinned `free-foil-NBE` demos.

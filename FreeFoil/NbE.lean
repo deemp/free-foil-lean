@@ -106,6 +106,14 @@ def Evaluator.instantiate (evaluator : Evaluator sig scope) (closure : Closure s
     (args : Fin closure.binder.names.length → Thunk sig scope) : Result (Value sig scope) :=
   evaluator.force (closure.instantiate args)
 
+/-- Eliminators used for one step of η comparison against an introduction form.
+A scoped observer receives the refreshed binder and may decline that pattern. -/
+structure EtaObservers (sig : Signature) (Context : Scope → Type) (op : sig.Op) where
+  term : ∀ {scope}, Fin (sig.terms op) → Context scope → Value sig scope → Thunk sig scope
+  body : ∀ {scope}, Fin (sig.scopes op) → (binder : Binder sig Nat) →
+    Context (binder.names ++ scope) →
+      Value sig (binder.names ++ scope) → Option (Thunk sig (binder.names ++ scope))
+
 /-- A language supplies its eliminations and any information needed under binders.
 The default rule keeps a node suspended. Refinement can be used for type-directed
 readback. Principal operands read back without refining their own heads. -/
@@ -120,6 +128,7 @@ structure Rules (sig : Signature) (Context : Scope → Type) where
   refine : ∀ {scope}, Evaluator sig scope → Context scope → Value sig scope → Result (Value sig scope) :=
     fun _ _ value => pure value
   isHead : (op : sig.Op) → Fin (sig.terms op) → Bool := fun _ _ => false
+  eta : (op : sig.Op) → Option (EtaObservers sig Context op) := fun _ => none
 
 /-- Use elimination rules without a client context. -/
 def Rules.scopeOnly

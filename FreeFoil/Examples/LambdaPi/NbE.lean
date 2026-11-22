@@ -38,5 +38,19 @@ def nbeRules : NbE.Rules sig NbE.NoContext where
     | .app => i == 0
     | .first | .second => true
     | _ => false
+  eta op := match op with
+    | .lam => some {
+      term i _ _ := Fin.elim0 i
+      body {scope} _ binder _ other := do
+        if shape : binder.shape = .variable then
+          have bound : 0 < binder.names.length := by
+            rw [binder.arity, shape]
+            decide
+          let name : Name (binder.names ++ scope) :=
+            ⟨binder.names[0], List.mem_append_left _ (List.getElem_mem bound)⟩
+          some (.node .app (Fin.cases (.ready other) (fun _ => .var name)) Fin.elim0)
+        else
+          none }
+    | _ => none
 
 end FreeFoil.Examples.LambdaPi

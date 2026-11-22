@@ -36,5 +36,12 @@ def nbeRules : NbE.Rules sig NbE.NoContext where
   isHead op _ := match op with
     | .first | .second | .split => true
     | _ => false
+  eta op := match op with
+    | .pair => some {
+      term i _ other :=
+        if i == 0 then .node .first (fun _ => .ready other) Fin.elim0
+        else .node .second (fun _ => .ready other) Fin.elim0
+      body i _ _ _ := Fin.elim0 i }
+    | _ => none
 
 end FreeFoil.Examples.NbEDemos.Pairs

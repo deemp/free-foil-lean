@@ -2,5 +2,6 @@ import FreeFoil.Alpha
 import FreeFoil.Annotated
 import FreeFoil.Named
 import FreeFoil.NbE
+import FreeFoil.NbE.Conversion
 import FreeFoil.SubstitutionLaws
 import FreeFoil.Telescope
