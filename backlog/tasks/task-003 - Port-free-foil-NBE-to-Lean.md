@@ -1,9 +1,11 @@
 ---
 id: TASK-003
 title: Port free-foil-NBE to Lean
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - Codex
 created_date: '2026-11-22 15:33'
+updated_date: '2026-11-22 15:45'
 labels:
   - nbe
   - port
@@ -32,3 +34,9 @@ Lean Free Foil provides scope-safe syntax and substitution. The pinned free-foil
 - [ ] #3 Representative examples from the pinned upstream demos agree with the Lean results up to α-equivalence. The existing λΠ and MLTT entry points retain their documented behavior.
 - [ ] #4 The README shows how to use the Lean NbE API and run its demos and benchmarks. The default `lake build` and `lake test` pass on the pinned Lean toolchain.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Complete the eight subtasks in dependency order, beginning with evaluation and readback, then demos, conversion, definitions, fragments, annotations, the dependent demo, and benchmarks. Review each subtask independently, verify it against the pinned upstream examples and the Lean test suite, and commit only its changes. Close the parent after verifying the entire port and its documentation.
+<!-- SECTION:PLAN:END -->
