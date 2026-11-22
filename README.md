@@ -174,6 +174,33 @@ def mixedRules : NbE.Rules Fragments.sig NbE.NoContext :=
 -- some "suc zero"
 ```
 
+### Elaborate and normalize dependent types
+
+The dependent-types demo uses the syntax from the pinned upstream
+`DependentTypes` examples. A universe is written `U 0`, a dependent function
+type `(x : A) -> B`, and a dependent pair type `(x : A) * B`. Every binder has a
+domain, and a pair is checked against its expected dependent pair type.
+
+```lean
+import FreeFoil.Examples.DependentTypes.Program
+
+open FreeFoil.Examples.DependentTypes
+
+#eval (do
+  let (term, _) ← (elaborate 128 "\\(x : Unit). x" "(x : Unit) -> Unit").toOption
+  let result ← (nf .empty 128 term).toOption
+  pure (result.pretty fun name => nomatch name.property) : Option String)
+-- some "\\(x0 : Unit). tt"
+```
+
+`normalize 128 source type` combines elaboration, full readback, and printing.
+Elaboration attaches scope-checked types to computed nodes. Readback and
+conversion get a neutral variable's type from the context and a neutral
+application or projection's type from its annotation. Unit, a function into a
+singleton, and a dependent pair of singletons have canonical inhabitants.
+Conversion also compares a function or pair with its η-expansion. Readback
+preserves neutral functions and pairs of non-singleton type.
+
 ## Define a signature
 
 Import `FreeFoil` for the generic library. A `Signature` gives each operator an arity for ordinary children and an arity for scoped children. Each scoped child has a pattern shape and a list of distinct names in binding order. The pattern shape determines the number of names, so a signature can use zero-name patterns, single binders, or patterns that bind several names. Operator and pattern shape equality are required for `AST.alphaEquiv`.

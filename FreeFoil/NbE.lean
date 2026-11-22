@@ -146,8 +146,22 @@ A scoped observer receives the refreshed binder and may decline that pattern. -/
 structure EtaObservers (sig : Signature) (Context : Scope → Type) (op : sig.Op) where
   term : ∀ {scope}, Fin (sig.terms op) → Context scope → Value sig scope → Thunk sig scope
   body : ∀ {scope}, Fin (sig.scopes op) → (binder : Binder sig Nat) →
-    Context (binder.names ++ scope) →
-      Value sig (binder.names ++ scope) → Option (Thunk sig (binder.names ++ scope))
+    Context (binder.names ++ scope) → Value sig (binder.names ++ scope) →
+      Option (Thunk sig (binder.names ++ scope))
+
+/-- A typed η observer can demand the other value's type and decline the
+comparison if it encounters a type of a different shape. -/
+structure EvaluatingEtaObservers (sig : Signature) (Context : Scope → Type) (op : sig.Op) where
+  term : ∀ {scope}, Evaluator sig scope → Fin (sig.terms op) → Context scope →
+    Value sig scope → Result (Option (Thunk sig scope))
+  body : ∀ {scope}, Fin (sig.scopes op) → (binder : Binder sig Nat) →
+    Evaluator sig (binder.names ++ scope) → Context (binder.names ++ scope) →
+      Value sig (binder.names ++ scope) → Result (Option (Thunk sig (binder.names ++ scope)))
+
+def EtaObservers.withEvaluator (observers : EtaObservers sig Context op) :
+    EvaluatingEtaObservers sig Context op where
+  term _ i ctx value := pure (some (observers.term i ctx value))
+  body i binder _ ctx value := pure (observers.body i binder ctx value)
 
 /-- A language supplies its eliminations and any information needed under binders.
 The default rule keeps a node suspended. Refinement can be used for type-directed
@@ -167,6 +181,12 @@ structure Rules (sig : Signature) (Context : Scope → Type) where
   definition : ∀ {scope}, Context scope → Name scope → Option (Thunk sig scope) :=
     fun _ _ => none
   unfolding : ∀ {scope}, Context scope → Unfolding := fun _ => .unfolded
+  /-- Annotation operands are read back but do not participate in conversion. -/
+  isAnnotation : (op : sig.Op) → Fin (sig.terms op) → Bool := fun _ _ => false
+  /-- Refinement that recursively inspects semantic types can use the remaining fuel. -/
+  refineWithFuel : Option (∀ {scope}, Nat → Evaluator sig scope → Context scope →
+    Value sig scope → Result (Value sig scope)) := none
+  etaWithEvaluator : (op : sig.Op) → Option (EvaluatingEtaObservers sig Context op) := fun _ => none
 
 /-- Use elimination rules without a client context. -/
 def Rules.scopeOnly
@@ -212,10 +232,14 @@ def eval (rules : Rules sig Context) (fuel : Nat) (ctx : Context scope)
 
 /-- Refine the chosen side of a definition when readback or comparison reaches it. -/
 def Rules.refineHead (rules : Rules sig Context) (evaluator : Evaluator sig scope)
-    (ctx : Context scope) (value : Value sig scope) : Result (Value sig scope) :=
+    (ctx : Context scope) (value : Value sig scope) (fuel : Option Nat := none) :
+    Result (Value sig scope) :=
   match value with
   | .glued .. => pure value
-  | _ => rules.refine evaluator ctx value
+  | _ =>
+    match rules.refineWithFuel, fuel with
+    | some refine, some fuel => refine fuel evaluator ctx value
+    | _, _ => rules.refine evaluator ctx value
 
 private def mapPositions (f : Fin n → Result α) : Result (Fin n → α) := do
   let values ← (Vector.ofFn id : Vector (Fin n) n).mapM f
@@ -261,7 +285,7 @@ private def readback (rules : Rules sig Context) (fuel : Nat) (ctx : Context sco
   | 0 => .error .outOfFuel
   | fuel + 1 => do
     let evaluator : Evaluator sig scope := ⟨force rules fuel ctx⟩
-    let value ← if refine then rules.refineHead evaluator ctx value else pure value
+    let value ← if refine then rules.refineHead evaluator ctx value (some fuel) else pure value
     match value with
     | .var name => pure (.var name)
     | .glued _ folded unfolded => do

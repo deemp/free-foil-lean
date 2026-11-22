@@ -54,5 +54,11 @@ def Rules.withDefinitions (rules : Rules sig Context) :
     body i binder ctx := observers.body i binder ctx.1 }
   definition ctx name := (ctx.2.lookup name).orElse fun _ => rules.definition ctx.1 name
   unfolding ctx := ctx.2.unfolding
+  isAnnotation := rules.isAnnotation
+  refineWithFuel := rules.refineWithFuel.map fun refine {_} fuel evaluator ctx =>
+    refine fuel evaluator ctx.1
+  etaWithEvaluator op := (rules.etaWithEvaluator op).map fun observers => {
+    term evaluator i ctx := observers.term evaluator i ctx.1
+    body i binder evaluator ctx := observers.body i binder evaluator ctx.1 }
 
 end FreeFoil.NbE

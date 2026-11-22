@@ -1,5 +1,6 @@
 import FreeFoil.Examples.LambdaPi.Program
 import FreeFoil.Tests.Annotated
+import FreeFoil.Tests.DependentTypes
 import FreeFoil.Tests.Derive
 import FreeFoil.Tests.MLTT
 import FreeFoil.Tests.MLTTCache
@@ -276,6 +277,7 @@ def main : IO Unit := do
   lambdaPiPatternTests
   lambdaPiProgramTests
   FreeFoil.Tests.Annotated.run
+  FreeFoil.Tests.DependentTypes.run
   FreeFoil.Tests.Derive.run
   FreeFoil.Tests.SOAS.run
   FreeFoil.Tests.MLTT.run

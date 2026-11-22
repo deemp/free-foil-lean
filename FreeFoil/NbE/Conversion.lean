@@ -12,6 +12,7 @@ private def compareNodes [DecidableEq sig.Pattern] (rules : Rules sig Context) (
     (leftTerms rightTerms : Fin (sig.terms op) → Thunk sig scope)
     (leftChildren rightChildren : Fin (sig.scopes op) → Closure sig scope) : Result Bool := do
   let sameTerms ← (List.finRange (sig.terms op)).allM fun i => do
+    if rules.isAnnotation op i then return true
     let left ← force rules fuel ctx (leftTerms i)
     let right ← force rules fuel ctx (rightTerms i)
     compare ctx (!rules.isHead op i) left right
@@ -33,20 +34,25 @@ private def compareNodes [DecidableEq sig.Pattern] (rules : Rules sig Context) (
 private def compareEta (rules : Rules sig Context) (fuel : Nat) (compare : Compare sig Context)
     (ctx : Context scope) (intro other : Value sig scope) : Result Bool := do
   let .node op terms children := intro | return false
-  let some observers := rules.eta op | return false
+  let some observers := (rules.etaWithEvaluator op).orElse
+    (fun _ => (rules.eta op).map EtaObservers.withEvaluator) | return false
+  let evaluator : Evaluator sig scope := ⟨force rules fuel ctx⟩
   let sameTerms ← (List.finRange (sig.terms op)).allM fun i => do
-    let left ← force rules fuel ctx (terms i)
-    let right ← force rules fuel ctx (observers.term i ctx other)
+    if rules.isAnnotation op i then return true
+    let some observed ← observers.term evaluator i ctx other | return false
+    let left ← evaluator.force (terms i)
+    let right ← evaluator.force observed
     compare ctx true left right
   if !sameTerms then return false
   (List.finRange (sig.scopes op)).allM fun i => do
     let child := children i
     let binder := child.freshBinder
-    let inner ← rules.extend ⟨force rules fuel ctx⟩ ctx op terms i binder.val
+    let inner ← rules.extend evaluator ctx op terms i binder.val
     let other := other.sink (fun {_} mem => List.mem_append_right _ mem)
-    let some observed := observers.body i binder.val inner other | return false
-    let left ← force rules fuel inner (child.openWith binder.val.names binder.property.1)
-    let right ← force rules fuel inner observed
+    let evaluator := ⟨force rules fuel inner⟩
+    let some observed ← observers.body i binder.val evaluator inner other | return false
+    let left ← evaluator.force (child.openWith binder.val.names binder.property.1)
+    let right ← evaluator.force observed
     compare inner true left right
 
 private inductive ComparisonMode where
@@ -63,8 +69,8 @@ private def compareValues [DecidableEq sig.Op] [DecidableEq sig.Pattern]
   | 0 => .error .outOfFuel
   | fuel + 1 => do
     let evaluator : Evaluator sig scope := ⟨force rules fuel ctx⟩
-    let left ← if refine then rules.refineHead evaluator ctx left else pure left
-    let right ← if refine then rules.refineHead evaluator ctx right else pure right
+    let left ← if refine then rules.refineHead evaluator ctx left (some fuel) else pure left
+    let right ← if refine then rules.refineHead evaluator ctx right (some fuel) else pure right
     let compare : Compare sig Context := fun ctx refine => compareValues rules fuel ctx refine mode
     match left, right with
     | .glued x leftFolded leftBody, .glued y rightFolded rightBody => do
