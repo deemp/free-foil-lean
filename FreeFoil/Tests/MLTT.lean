@@ -148,6 +148,57 @@ private def parameterTests : IO Unit := do
   let cyclic ← singleModule "module Dep import Top"
   expectError "cyclic module imports" (runModules #[client, cyclic])
 
+private def namedTelescopeTests : IO Unit := do
+  let source := "telescope Params include Carrier include Spare (x : A);\n\
+    module Left include Params (y : A);\n\
+    def item over (A, y) : A := y;\n\
+    telescope Carrier (A : 𝕌);\n\
+    telescope Spare (spare : 𝟙);\n\
+    module Right include Params;\n\
+    def item over (A, x) : A := x;\n\
+    module Client import Left import Right\n\
+    compute Left.item 𝟙 tt\n\
+    compute Right.item 𝟙 tt"
+  let .modules modules ← expectOk (Parser.parseInput source)
+    | throw (IO.userError "telescope source did not parse as MLTT modules")
+  let #[left, right, _] := modules
+    | throw (IO.userError "telescope declarations appeared as MLTT modules")
+  verify "MLTT did not place included fields in order before local fields"
+    (left.parameters.map Parameter.name == #["A", "spare", "x", "y"] &&
+      right.parameters.map Parameter.name == #["A", "spare", "x"])
+  let results ← expectOk (runModules modules)
+  verify "MLTT did not compute through both independently elaborated telescope headers"
+    (results.back? == some ("Client", #[.computed "tt", .computed "tt"]))
+  let explicit ← singleModule
+    "module Left (A : 𝕌) (spare : 𝟙) (x : A) (y : A) def item over (A, y) : A := y"
+  let (included, _) ← expectOk (checkModule .empty ⟨10, 20⟩ left)
+  let (written, _) ← expectOk (checkModule .empty ⟨10, 20⟩ explicit)
+  let _ ← expectOk (linkModules included written)
+  let importedTypes ← expectOk (Parser.parseModules
+    "telescope Imported (x : U)\n\
+    module UnitType def U : 𝕌 := 𝟙\n\
+    module Universe def U : 𝕌 := 𝕌\n\
+    module UnitUser include Imported import UnitType def chosen : U := x\n\
+    module UniverseUser include Imported import Universe def chosen : U := x\n\
+    module ImportClient import UnitUser import UniverseUser\n\
+    compute UnitUser.chosen tt\n\
+    compute UniverseUser.chosen 𝟙")
+  let results ← expectOk (runModules importedTypes)
+  verify "MLTT did not resolve telescope fields in each module's import scope"
+    (results.back? == some ("ImportClient", #[.computed "tt", .computed "𝟙"]))
+  expectError "missing telescope 'Missing' in module 'Client'"
+    (Parser.parseModules "module Client include Missing")
+  expectError "missing telescope 'Missing'"
+    (Parser.parseModules "telescope T include Missing")
+  expectError "cyclic telescope includes: A -> B -> A"
+    (Parser.parseModules "telescope A include B telescope B include A")
+  expectError "duplicate telescope 'T'"
+    (Parser.parseModules "telescope T telescope T")
+  expectError "duplicate parameter 'A' in telescope 'Both'"
+    (Parser.parseModules "telescope T (A : 𝕌) telescope Both include T include T")
+  expectError "duplicate parameter 'A' in module 'Client'"
+    (Parser.parseModules "telescope T (A : 𝕌) module Client include T (A : 𝕌)")
+
 private def moduleLinkTests : IO Unit := do
   let common ← singleModule "module Common def base : 𝟙 := tt def U : 𝕌 := 𝟙"
   let left ← singleModule "module Left (A : 𝕌) (x : A) (unused : 𝟙) import Common\n\
@@ -312,6 +363,7 @@ def run : IO Unit := do
   contextTests
   programTests
   parameterTests
+  namedTelescopeTests
   moduleLinkTests
   importResolutionTests
   artifactTests

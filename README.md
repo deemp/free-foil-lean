@@ -84,6 +84,23 @@ Lean clients can call `checkModule` with a half-open `NameRange`. The function a
 
 The parameter example is the [unchanged upstream fixture](https://github.com/fizruk/free-foil/blob/fdfbeef/haskell/mltt/examples/parameters.mltt).
 
+### Share module parameters with named telescopes
+
+Declare a telescope alongside the modules and use `include` before the local parameters in a module or telescope header.
+
+```text
+telescope Carrier (A : 𝕌)
+telescope Pointed include Carrier (point : A)
+
+module Points include Pointed
+def chosen over (A, point) : A := point
+
+module Pairs include Pointed (other : A)
+def chosen over (A, other) : A := other
+```
+
+The fields of each include appear in their declared order, followed by the local parameters. Each including module checks the expanded header in its own scope. Definitions discharge the parameters they use and the dependencies of those parameters, as with an explicit header. Telescope names can be used before their declaration in the same source. Missing telescopes, include cycles, and repeated parameter names are errors.
+
 ## Save and load checked MLTT modules
 
 Import `FreeFoil.Examples.MLTT` to use artifacts from Lean. Call `makeArtifact` on a checked environment and module name, then use `encodeArtifact` to produce a versioned JSON string for storage. Read it with `decodeArtifact` and call `loadArtifact` with the module's dependencies already checked or loaded. The restored module retains its declaration identifiers and can be linked or imported like a module checked from source.

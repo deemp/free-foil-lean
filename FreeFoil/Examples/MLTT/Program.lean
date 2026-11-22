@@ -191,9 +191,18 @@ where
     eof
     pure ⟨moduleName, commands⟩
 
-private def moduleParser : Parser Module := do
-  keyword "module"
+private structure ParameterHeader where
+  name : String
+  includes : Array String
+  parameters : Array Parameter
+
+private inductive SourceUnit where
+  | module (header : ParameterHeader) (imports : Array String) (commands : Array Command)
+  | telescope (header : ParameterHeader)
+
+private def parameterHeader : Parser ParameterHeader := do
   let name ← identifier
+  let includes ← many (keyword "include" *> identifier)
   let parameters ← many do
     symbol "("
     let name ← identifier
@@ -202,28 +211,89 @@ private def moduleParser : Parser Module := do
     symbol ")"
     pure (⟨name, type.toRaw⟩ : Parameter)
   let _ ← optional (symbol ";")
-  let imports ← many (keyword "import" *> identifier <* optional (symbol ";"))
-  let commands ← many (command <* optional (symbol ";"))
-  pure ⟨name, parameters, imports, commands⟩
+  pure ⟨name, includes, parameters⟩
 
-def parseModules (source : String) : Except String (Array Module) :=
-  (trivia *> many1 moduleParser <* eof).run source
+private def sourceUnit : Parser SourceUnit :=
+  (keyword "telescope" *> (SourceUnit.telescope <$> parameterHeader)) <|> do
+    keyword "module"
+    let header ← parameterHeader
+    let imports ← many (keyword "import" *> identifier <* optional (symbol ";"))
+    let commands ← many (command <* optional (symbol ";"))
+    pure (.module header imports commands)
 
-/-- Parse the standalone program form or an input containing named modules. -/
-def parseInput (source : String) : Except String Input := parser.run source
+private def distinctParameters (owner : String) (parameters : Array Parameter) : Except String Unit := do
+  let mut seen : List String := []
+  for param in parameters do
+    if seen.contains param.name then
+      throw s!"duplicate parameter '{param.name}' in {owner}"
+    seen := param.name :: seen
+
+/-- Memoize expanded raw headers. Their field types are checked in each including module. -/
+private partial def expandTelescope (declared : List (String × ParameterHeader))
+    (path : List String) (expanded : List (String × Array Parameter)) (name : String) :
+    Except String (List (String × Array Parameter) × Array Parameter) := do
+  if path.contains name then
+    throw s!"cyclic telescope includes: {String.intercalate " -> " (name :: path).reverse}"
+  if let some params := expanded.lookup name then
+    return (expanded, params)
+  let some header := declared.lookup name
+    | throw s!"missing telescope '{name}' in include chain {String.intercalate " -> " path.reverse}"
+  let mut expanded := expanded
+  let mut params := #[]
+  for included in header.includes do
+    let (next, fields) ← expandTelescope declared (name :: path) expanded included
+    expanded := next
+    params := params ++ fields
+  params := params ++ header.parameters
+  distinctParameters s!"telescope '{name}'" params
+  pure ((name, params) :: expanded, params)
+
+private def expandSource (units : Array SourceUnit) : Except String (Array Module) := do
+  let mut declared : List (String × ParameterHeader) := []
+  for unit in units do
+    if let .telescope header := unit then
+      if (declared.lookup header.name).isSome then
+        throw s!"duplicate telescope '{header.name}'"
+      declared := (header.name, header) :: declared
+  let mut expanded : List (String × Array Parameter) := []
+  for (name, _) in declared.reverse do
+    let (next, _) ← expandTelescope declared [] expanded name
+    expanded := next
+  let mut modules := #[]
+  for unit in units do
+    if let .module header imports commands := unit then
+      let mut params := #[]
+      for name in header.includes do
+        let some fields := expanded.lookup name
+          | throw s!"missing telescope '{name}' in module '{header.name}'"
+        params := params ++ fields
+      params := params ++ header.parameters
+      unless header.includes.isEmpty do
+        distinctParameters s!"module '{header.name}'" params
+      modules := modules.push ⟨header.name, params, imports, commands⟩
+  pure modules
+
+def parseModules (source : String) : Except String (Array Module) := do
+  expandSource (← (trivia *> many1 sourceUnit <* eof).run source)
+
+/-- Parse a standalone program or expand the headers of a module source. -/
+def parseInput (source : String) : Except String Input := do
+  let input ← parser.run source
+  match input with
+  | .inr program => pure (.standalone program)
+  | .inl units =>
+    if let #[.module header imports commands] := units then
+      if header.includes.isEmpty && header.parameters.isEmpty && imports.isEmpty then
+        return .standalone ⟨some header.name, commands⟩
+    pure (.modules (← expandSource units))
 where
-  parser : Parser Input := do
+  parser : Parser (Sum (Array SourceUnit) Program) := do
     trivia
-    let input ← (Input.modules <$> many1 moduleParser) <|> do
+    let input ← (Sum.inl <$> many1 sourceUnit) <|> do
       let commands ← many (command <* optional (symbol ";"))
-      pure (.standalone ⟨none, commands⟩)
+      pure (.inr ⟨none, commands⟩)
     eof
-    match input with
-    | .modules #[m] =>
-      if m.parameters.isEmpty && m.imports.isEmpty then
-        pure (.standalone ⟨some m.name, m.commands⟩)
-      else pure input
-    | _ => pure input
+    pure input
 
 end Parser
 
