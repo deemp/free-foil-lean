@@ -26,6 +26,14 @@ inductive AnnotatedOp (sig : Signature) (metadata : Type) where
   | original (op : sig.Op)
   | annotation (data : metadata) (termCount : Nat)
 
+instance [DecidableEq sig.Op] [DecidableEq metadata] : DecidableEq (AnnotatedOp sig metadata)
+  | .original left, .original right =>
+    decidable_of_iff (left = right) (by simp)
+  | .annotation left n, .annotation right m =>
+    decidable_of_iff (left = right ∧ n = m) (by simp)
+  | .original _, .annotation _ _ => isFalse (fun equal => nomatch equal)
+  | .annotation _ _, .original _ => isFalse (fun equal => nomatch equal)
+
 /-- Extend a signature with annotation wrappers. Each wrapper has its subject and
 its annotation terms as ordinary children in the same scope. -/
 abbrev Signature.annotated (sig : Signature) (metadata : Type) : Signature where

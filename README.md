@@ -174,6 +174,36 @@ def mixedRules : NbE.Rules Fragments.sig NbE.NoContext :=
 -- some "suc zero"
 ```
 
+### Normalize annotated syntax
+
+Use `Fragment.annotated` when a fragment's reduction rules can ignore metadata
+and scope-checked annotation terms. Evaluation follows the annotated term's
+subject. Full readback produces blank annotations, represented by ordinary
+nodes without annotation wrappers. Weak-head readback preserves wrappers in
+frozen bodies. Conversion compares the underlying terms.
+
+```lean
+import FreeFoil.Examples.NbEDemos.Fragments
+import FreeFoil.NbE.Annotated
+
+open FreeFoil FreeFoil.Examples.NbEDemos
+
+#eval (do
+  let raw ← (Fragments.parse "fst ((\\x. (suc x, zero)) zero)").toOption
+  let term ← (AST.fromClosed raw).toOption
+  let annotated := (AnnotatedAST.ofAST term).annotate ((0, 30) : Nat × Nat)
+  let rules := (Fragments.fragment.annotated (Nat × Nat)).rules
+  let normal ← (NbE.nf rules 64 () annotated).toOption
+  let erased := AnnotatedAST.erase normal
+  pure (Fragments.pretty (erased.toNamed [] fun name => nomatch name.property)) : Option String)
+-- some "suc zero"
+```
+
+When reduction, readback, or conversion needs information from annotations,
+supply language-specific `NbE.Rules` for the annotated signature. The
+dependent-types demo below uses scope-checked types for readback and
+conversion.
+
 ### Elaborate and normalize dependent types
 
 The dependent-types demo uses the syntax from the pinned upstream

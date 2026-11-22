@@ -5,6 +5,7 @@ import FreeFoil.Tests.Derive
 import FreeFoil.Tests.MLTT
 import FreeFoil.Tests.MLTTCache
 import FreeFoil.Tests.NbE
+import FreeFoil.Tests.NbEAnnotated
 import FreeFoil.Tests.NbEConversion
 import FreeFoil.Tests.NbEDefinitions
 import FreeFoil.Tests.NbEDemos
@@ -283,6 +284,7 @@ def main : IO Unit := do
   FreeFoil.Tests.MLTT.run
   FreeFoil.Tests.MLTTCache.run
   FreeFoil.Tests.NbE.run
+  FreeFoil.Tests.NbEAnnotated.run
   FreeFoil.Tests.NbEConversion.run
   FreeFoil.Tests.NbEDefinitions.run
   FreeFoil.Tests.NbEDemos.run
