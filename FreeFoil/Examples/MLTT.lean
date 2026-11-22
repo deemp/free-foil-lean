@@ -1,1 +1,1 @@
-import FreeFoil.Examples.MLTT.Program
+import FreeFoil.Examples.MLTT.Module

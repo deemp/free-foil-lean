@@ -113,10 +113,119 @@ private def programTests : IO Unit := do
     verify "MLTT installed an ill-typed definition" (unbound.startsWith "unbound")
   | _ => throw (IO.userError (reprStr results))
 
+private def singleModule (source : String) : IO Module := do
+  let #[mod] ← expectOk (Parser.parseModules source)
+    | throw (IO.userError "expected one MLTT module")
+  pure mod
+
+private def expectError (fragment : String) (result : Except String α) : IO Unit :=
+  match result with
+  | .error message =>
+    verify s!"expected '{fragment}' in MLTT error '{message}'" (message.contains fragment)
+  | .ok _ => throw (IO.userError s!"expected MLTT error containing '{fragment}'")
+
+private def parameterTests : IO Unit := do
+  let source ← IO.FS.readFile "test/fixtures/mltt/parameters.mltt"
+  let modules ← expectOk (Parser.parseModules source)
+  let results ← expectOk (runModules modules)
+  let computed := (results.flatMap Prod.snd).filterMap fun
+    | .computed result => some result
+    | _ => none
+  verify "the upstream MLTT parameter example reduced a command incorrectly"
+    (computed == #["tt", "tt", "tt", "tt", "tt"])
+  let wrongOver ← singleModule
+    "module Wrong (A : 𝕌) (x : A) def item over (x) : A := x"
+  expectError "uses over (A, x)" (checkModule .empty ⟨0, 1⟩ wrongOver)
+  let dupParam ← singleModule "module Wrong (A : 𝕌) (A : 𝕌)"
+  expectError "duplicate parameter" (checkModule .empty ⟨0, 1⟩ dupParam)
+  let badParam ← singleModule "module Wrong (a : tt)"
+  expectError "expected type" (checkModule .empty ⟨0, 1⟩ badParam)
+  let client ← singleModule "module Top import Dep compute Dep.result"
+  let dep ← singleModule "module Dep def result : 𝟙 := tt"
+  verify "MLTT did not build modules in dependency order"
+    (((← expectOk (runModules #[client, dep])).map Prod.fst) == #["Dep", "Top"])
+  expectError "missing dependency 'Dep'" (runModules #[client])
+  let cyclic ← singleModule "module Dep import Top"
+  expectError "cyclic module imports" (runModules #[client, cyclic])
+
+private def moduleLinkTests : IO Unit := do
+  let common ← singleModule "module Common def base : 𝟙 := tt def U : 𝕌 := 𝟙"
+  let left ← singleModule "module Left (A : 𝕌) (x : A) (unused : 𝟙) import Common\n\
+    def first : A := x\n\
+    def left over (x, A) : A := first\n\
+    def common : 𝟙 := base"
+  let right ← singleModule "module Right (x : U) import Common def right : U := x"
+  let client ← singleModule "module Client import Left import Right\n\
+    compute Right.right (Left.left 𝟙 Left.common)"
+  let (base, _) ← expectOk (checkModule .empty ⟨10, 20⟩ common)
+  let (a, _) ← expectOk (checkModule base ⟨100, 110⟩ left)
+  let (b, _) ← expectOk (checkModule base ⟨50, 60⟩ right)
+  for linked in [linkModules a b, linkModules b a] do
+    let linked ← expectOk linked
+    let names (moduleName : String) : List (Nat × List String) :=
+      ((linked.find? moduleName).map (·.declarations)).getD [] |>.map fun decl =>
+        (decl.key.id, decl.parameters)
+    verify "linking renamed or duplicated a declaration"
+      (names "Left" == [(100, ["A", "x"]), (101, ["A", "x"]), (102, [])] &&
+        names "Right" == [(50, ["x"])] && names "Common" == [(10, []), (11, [])] &&
+        linked.scope.Nodup)
+    let (_, results) ← expectOk (checkModule linked ⟨150, 160⟩ client)
+    verify "a linked client could not compute through both imports"
+      (results == #[.computed "tt"])
+    let hidden ← singleModule "module Client import Left import Right compute base"
+    expectError "unbound name 'base'" (checkModule linked ⟨150, 160⟩ hidden)
+    let transient ← singleModule "module Client import Left compute Left.unused"
+    expectError "unbound name 'Left.unused'" (checkModule linked ⟨150, 160⟩ transient)
+
+  expectError "invalid reserved name range" (checkModule base ⟨20, 20⟩ left)
+  expectError "invalid reserved name range" (checkModule base ⟨55, 54⟩ right)
+  expectError "range exhausted" (checkModule base ⟨30, 32⟩ left)
+  expectError "ranges overlap" (checkModule base ⟨12, 13⟩ right)
+  let (unusedRange, _) ← expectOk (checkModule base ⟨109, 111⟩ right)
+  expectError "ranges overlap" (linkModules a unusedRange)
+  let emptyA ← singleModule "module EmptyA"
+  let emptyB ← singleModule "module EmptyB"
+  let (emptyLeft, _) ← expectOk (checkModule base ⟨40, 42⟩ emptyA)
+  let (emptyRight, _) ← expectOk (checkModule base ⟨41, 43⟩ emptyB)
+  expectError "ranges overlap" (linkModules emptyLeft emptyRight)
+  let conflicting ← singleModule
+    "module Common def base : 𝟙 := (λ x ⇒ x : 𝟙 → 𝟙) tt def U : 𝕌 := 𝟙"
+  let (changedBase, _) ← expectOk (checkModule .empty ⟨10, 20⟩ conflicting)
+  let (changedBranch, _) ← expectOk (checkModule changedBase ⟨50, 60⟩ right)
+  expectError "conflicting checked copies of module 'Common'" (linkModules a changedBranch)
+  let withImport ← singleModule "module EmptyA import Common"
+  let (changedImports, _) ← expectOk (checkModule base ⟨40, 42⟩ withImport)
+  expectError "conflicting checked copies of module 'EmptyA'" (linkModules emptyLeft changedImports)
+
+private def importResolutionTests : IO Unit := do
+  let left ← singleModule "module Left def shared : 𝟙 := tt def Nested.name : 𝟙 := tt"
+  let right ← singleModule "module Left.Nested def shared : 𝟙 := tt def name : 𝟙 := tt"
+  let (env, _) ← expectOk (checkModule .empty ⟨0, 2⟩ left)
+  let (env, _) ← expectOk (checkModule env ⟨2, 4⟩ right)
+  let header := "module Client import Left import Left.Nested "
+  let ambiguous ← singleModule (header ++ "compute shared")
+  expectError "ambiguous name 'shared'" (checkModule env ⟨4, 5⟩ ambiguous)
+  let qualified ← singleModule (header ++ "compute Left.Nested.name")
+  expectError "ambiguous name 'Left.Nested.name'" (checkModule env ⟨4, 5⟩ qualified)
+  let client ← singleModule (header ++ "def shared : 𝟙 := Left.shared compute shared")
+  let (_, results) ← expectOk (checkModule env ⟨4, 5⟩ client)
+  verify "an import collision hid a local definition or qualified name"
+    (results == #[.defined "shared", .computed "tt"])
+  let binder ← singleModule (header ++ "compute (λ shared ⇒ shared : 𝟙 → 𝟙) tt")
+  let (_, results) ← expectOk (checkModule env ⟨4, 5⟩ binder)
+  verify "an import collision hid a lexical binder" (results == #[.computed "tt"])
+  let parameter ← singleModule "module Client (shared : 𝟙) import Left import Left.Nested\n\
+    def value over (shared) : 𝟙 := shared"
+  let (_, results) ← expectOk (checkModule env ⟨4, 5⟩ parameter)
+  verify "an import collision hid a parameter" (results == #[.defined "value"])
+
 def run : IO Unit := do
   bidirectionalTests
   conversionTests
   contextTests
   programTests
+  parameterTests
+  moduleLinkTests
+  importResolutionTests
 
 end FreeFoil.Tests.MLTT

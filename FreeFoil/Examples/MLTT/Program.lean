@@ -5,12 +5,27 @@ namespace FreeFoil.Examples.MLTT
 
 inductive Command where
   | define (name : String) (type value : Raw)
+  | defineOver (name : String) (parameters : List String) (type value : Raw)
   | check (term type : Raw)
   | compute (term : Raw)
 
 structure Program where
   moduleName : Option String
   commands : Array Command
+
+structure Parameter where
+  name : String
+  type : Raw
+
+structure Module where
+  name : String
+  parameters : Array Parameter
+  imports : Array String
+  commands : Array Command
+
+inductive Input where
+  | standalone (program : Program)
+  | modules (modules : Array Module)
 
 namespace Parser
 
@@ -141,11 +156,22 @@ where
   define : Parser Command := do
     keyword "def"
     let name ← identifier
+    let parameters ← optional do
+      keyword "over"
+      symbol "("
+      let names ← optional do
+        let first ← identifier
+        let rest ← many (symbol "," *> identifier)
+        pure (first :: rest.toList)
+      symbol ")"
+      pure (names.getD [])
     symbol ":"
     let type ← term
     symbol ":="
     let value ← term
-    pure (.define name type.toRaw value.toRaw)
+    pure (match parameters with
+      | none => .define name type.toRaw value.toRaw
+      | some names => .defineOver name names type.toRaw value.toRaw)
   checkTerm : Parser Command := do
     keyword "check"
     let value ← term
@@ -165,6 +191,40 @@ where
     eof
     pure ⟨moduleName, commands⟩
 
+private def moduleParser : Parser Module := do
+  keyword "module"
+  let name ← identifier
+  let parameters ← many do
+    symbol "("
+    let name ← identifier
+    symbol ":"
+    let type ← term
+    symbol ")"
+    pure (⟨name, type.toRaw⟩ : Parameter)
+  let _ ← optional (symbol ";")
+  let imports ← many (keyword "import" *> identifier <* optional (symbol ";"))
+  let commands ← many (command <* optional (symbol ";"))
+  pure ⟨name, parameters, imports, commands⟩
+
+def parseModules (source : String) : Except String (Array Module) :=
+  (trivia *> many1 moduleParser <* eof).run source
+
+/-- Parse the standalone program form or an input containing named modules. -/
+def parseInput (source : String) : Except String Input := parser.run source
+where
+  parser : Parser Input := do
+    trivia
+    let input ← (Input.modules <$> many1 moduleParser) <|> do
+      let commands ← many (command <* optional (symbol ";"))
+      pure (.standalone ⟨none, commands⟩)
+    eof
+    match input with
+    | .modules #[m] =>
+      if m.parameters.isEmpty && m.imports.isEmpty then
+        pure (.standalone ⟨some m.name, m.commands⟩)
+      else pure input
+    | _ => pure input
+
 end Parser
 
 inductive CommandResult where
@@ -178,6 +238,25 @@ instance : ToString CommandResult where
     | .defined name => s!"✓ defined {name}"
     | .checked term type => s!"✓ {term} : {type}"
     | .computed value => s!"↦ {value}"
+
+def checkQuery (ctx : Context scope) (fuel : Nat) (term type : Term scope)
+    (display : Term scope → String) : Except String CommandResult := do
+  (checkDefinition ctx fuel type term).mapError toString
+  pure (.checked (display term) (display type))
+
+def computeQuery (ctx : Context scope) (fuel : Nat) (term : Term scope)
+    (display : Term scope → String) : Except String CommandResult := do
+  let _ ← (infer ctx fuel term).mapError toString
+  let normal ← (nf scope ctx.definitions fuel term).mapError fun
+    | .outOfFuel => "evaluation ran out of fuel"
+  pure (.computed (display normal))
+
+def resolveTerm (scope : Scope) (resolve : String → Option (Name scope)) (raw : Raw)
+    (missing : String → String := fun name => s!"unbound name '{name}'") :
+    Except String (Term scope) :=
+  (AST.fromNamed scope resolve raw).mapError fun
+    | .unbound name => missing name
+    | .duplicateBinder names => s!"duplicate name in binder pattern ({String.intercalate ", " names})"
 
 private structure Environment where
   scope : Scope
@@ -195,35 +274,31 @@ private def Environment.extend (env : Environment) (name : String)
     names := (name, env.scope.fresh) :: env.names.map (fun (text, key) => (text, key.sink outer)) }
 
 private def Environment.resolve (env : Environment) (term : Raw) : Except String (Term env.scope) :=
-  (AST.fromNamed env.scope (fun name => env.names.lookup name) term).mapError fun
-    | .unbound name => s!"unbound name '{name}'"
-    | .duplicateBinder names => s!"duplicate name in binder pattern ({String.intercalate ", " names})"
+  resolveTerm env.scope (fun name => env.names.lookup name) term
 
 private def Environment.display (env : Environment) (term : Term env.scope) : String :=
   prettyTerm env.scope term fun key =>
     (env.names.findSome? (fun (name, candidate) =>
       if candidate.id == key.id then some name else none)).getD s!"x{key.id}"
 
-private def runCommand (env : Environment) (fuel : Nat) :
-    Command → Except String (Environment × CommandResult)
-  | .define name rawType rawValue => do
+private def runCommand (env : Environment) (fuel : Nat) (command : Command) :
+    Except String (Environment × CommandResult) := do
+  match command with
+  | .define name rawType rawValue | .defineOver name [] rawType rawValue =>
     if (env.names.lookup name).isSome then
       throw s!"duplicate definition '{name}'"
     let type ← env.resolve rawType
     let value ← env.resolve rawValue
     (checkDefinition env.context fuel type value).mapError toString
     pure (env.extend name type value, .defined name)
+  | .defineOver _ _ _ _ => throw "an 'over' clause in a standalone program must be empty"
   | .check rawTerm rawType => do
     let term ← env.resolve rawTerm
     let type ← env.resolve rawType
-    (checkDefinition env.context fuel type term).mapError toString
-    pure (env, .checked (env.display term) (env.display type))
+    pure (env, ← checkQuery env.context fuel term type env.display)
   | .compute rawTerm => do
     let term ← env.resolve rawTerm
-    let _ ← (infer env.context fuel term).mapError toString
-    let normal ← (nf env.scope env.context.definitions fuel term).mapError fun
-      | .outOfFuel => "evaluation ran out of fuel"
-    pure (env, .computed (env.display normal))
+    pure (env, ← computeQuery env.context fuel term env.display)
 
 /-- Run commands in order, keeping the environment from the last successful command. -/
 def runProgram (program : Program) (fuel : Nat := 1024) : Array (Except String CommandResult) := Id.run do

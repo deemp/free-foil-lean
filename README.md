@@ -66,6 +66,20 @@ lake exe mltt test/fixtures/mltt/core.mltt
 lake exe mltt - < test/fixtures/mltt/core.mltt
 ```
 
-The interpreter runs the `def`, `check`, and `compute` commands of a standalone program. `compute` infers a type and then fully normalizes the term. The core includes dependent functions and pairs, recursive pair patterns, unit, and identity types with `refl` and `J`. The core follows upstream in using one universe with type-in-type and reports fuel exhaustion when reduction or type checking exceeds its recursion budget. Module parameters, linking, and checked artifacts are later milestones.
+The interpreter runs the `def`, `check`, and `compute` commands of a standalone program. `compute` infers a type and then fully normalizes the term. The core includes dependent functions and pairs, recursive pair patterns, unit, and identity types with `refl` and `J`. The core follows upstream in using one universe with type-in-type and reports fuel exhaustion when reduction or type checking exceeds its recursion budget.
 
 The test suite runs [the unchanged upstream core fixture](https://github.com/fizruk/free-foil/blob/fdfbeef/haskell/mltt/examples/core.mltt), distributed under the [upstream MLTT license](test/fixtures/mltt/LICENSE).
+
+## Check and link MLTT modules
+
+```sh
+lake exe mltt test/fixtures/mltt/parameters.mltt
+```
+
+A file can contain several named modules. Each module declares its dependent parameters after its name and lists its direct imports before its commands. A definition is abstracted over just the parameters its type and value need, including the dependencies of those parameters. An optional `over` clause asserts that set. References within the module automatically supply those arguments. Clients pass them explicitly.
+
+An import exposes each declaration by its bare name and by its module-qualified name. A local definition or binder takes precedence over imported names. If an imported spelling refers to several distinct declarations, the interpreter reports an ambiguity when that spelling is used.
+
+Lean clients can call `checkModule` with a half-open `NameRange`. The function allocates declaration identifiers in source order. Use `linkModules` to combine separately checked environments, including branches with a shared dependency. Linking widens the declaration scopes while retaining their identifiers and rejects overlapping reservations or conflicting copies of the same module.
+
+The parameter example is the [unchanged upstream fixture](https://github.com/fizruk/free-foil/blob/fdfbeef/haskell/mltt/examples/parameters.mltt).
