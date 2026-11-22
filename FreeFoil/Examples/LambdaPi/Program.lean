@@ -1,5 +1,5 @@
 import FreeFoil.Examples.LambdaPi
-import Std.Internal.Parsec.String
+import FreeFoil.Examples.TermParser
 
 namespace FreeFoil.Examples.LambdaPi
 
@@ -10,39 +10,10 @@ inductive Command where
 namespace Parser
 
 open Std.Internal.Parsec
-open Std.Internal.Parsec.String (Parser skipString ws)
+open Std.Internal.Parsec.String (Parser)
+open TermParser (trivia symbol keyword)
 
-private partial def skipBlockComment : Parser Unit :=
-  skipString "-}" <|> (any *> skipBlockComment)
-
-private def trivia : Parser Unit := do
-  ws
-  let _ ← many do
-    (skipString "--" *> many (satisfy (· != '\n')) *> pure ()) <|>
-      (skipString "{-" *> skipBlockComment)
-    ws
-
-private def symbol (text : String) : Parser Unit :=
-  skipString text *> trivia
-
-private def isLetter (c : Char) : Bool :=
-  c.isAlpha || (c >= 'À' && c <= 'ÿ' && c != '×' && c != '÷')
-
-private def isIdentRest (c : Char) : Bool :=
-  isLetter c || c.isDigit || c == '_' || c == '\''
-
-private def identifier : Parser String := do
-  let name ← attempt do
-    let first ← satisfy isLetter
-    let rest ← many (satisfy isIdentRest)
-    let name := String.ofList (first :: rest.toList)
-    if name == "compute" || name == "check" then fail "expected an identifier"
-    else pure name
-  trivia
-  pure name
-
-private def keyword (text : String) : Parser Unit :=
-  attempt (skipString text *> notFollowedBy (satisfy isIdentRest)) *> trivia
+private def identifier : Parser String := TermParser.identifier ["compute", "check"]
 
 private partial def pattern : Parser (Binder sig String) :=
   (symbol "_" *> pure Raw.wildcard) <|> (Raw.varPattern <$> identifier) <|> do
@@ -131,25 +102,31 @@ private def renderPattern (shape : Pattern) (names : List String) : String × Li
     let (snd, rest) := renderPattern right rest
     (s!"({fst}, {snd})", rest)
 
-private def renderTerm (prec : Nat) (value : NamedTerm) : String :=
+private def renderTerm (ascii : Bool) (prec : Nat) (value : NamedTerm) : String :=
   let paren (own : Nat) (text : String) := if prec > own then s!"({text})" else text
   match value with
   | .var name => name
-  | .app fn arg => paren 1 s!"{renderTerm 1 fn} {renderTerm 2 arg}"
+  | .app fn arg => paren 1 s!"{renderTerm ascii 1 fn} {renderTerm ascii 2 arg}"
   | .lam ⟨shape, names, _, body⟩ =>
     let pat := (renderPattern shape names).1
-    paren 0 s!"λ {pat}. {renderTerm 0 body}"
+    let lam := if ascii then "\\" else "λ "
+    paren 0 s!"{lam}{pat}. {renderTerm ascii 0 body}"
   | .pi domain ⟨shape, names, _, codomain⟩ =>
     let pat := (renderPattern shape names).1
-    paren 0 s!"Π ({pat} : {renderTerm 0 domain}) → {renderTerm 0 codomain}"
+    let pi := if ascii then "" else "Π "
+    let arrow := if ascii then "->" else "→"
+    paren 0 s!"{pi}({pat} : {renderTerm ascii 0 domain}) {arrow} {renderTerm ascii 0 codomain}"
   | .univ => paren 0 "𝕌"
-  | .pair fst snd => paren 0 s!"({renderTerm 0 fst}, {renderTerm 0 snd})"
-  | .first term => paren 0 s!"π₁({renderTerm 0 term})"
-  | .second term => paren 0 s!"π₂({renderTerm 0 term})"
-  | .product fst snd => paren 0 s!"{renderTerm 1 fst} × {renderTerm 1 snd}"
+  | .pair fst snd => paren 0 s!"({renderTerm ascii 0 fst}, {renderTerm ascii 0 snd})"
+  | .first term => paren 0 s!"π₁({renderTerm ascii 0 term})"
+  | .second term => paren 0 s!"π₂({renderTerm ascii 0 term})"
+  | .product fst snd => paren 0 s!"{renderTerm ascii 1 fst} × {renderTerm ascii 1 snd}"
 termination_by structural value
 
-def prettyTerm (value : Raw) : String := renderTerm 0 (NamedTerm.fromRaw value)
+def prettyTerm (value : Raw) : String := renderTerm false 0 (NamedTerm.fromRaw value)
+
+/-- Render lambda and Π binders with the ASCII spelling of the upstream NbE demo. -/
+def prettyNbETerm (value : Raw) : String := renderTerm true 0 (NamedTerm.fromRaw value)
 
 inductive InterpretError where
   | scope (error : ResolveError String)
@@ -170,6 +147,6 @@ def interpret (fuel : Nat) (command : Command) : Except InterpretError String :=
   | .compute value _ =>
     let term ← (AST.fromClosed value).mapError .scope
     let result ← (whnf [] fuel term).mapError .evaluation
-    pure (renderTerm 0 (Term.toNamedTerm [] result fun x => nomatch x.property))
+    pure (renderTerm false 0 (Term.toNamedTerm [] result fun x => nomatch x.property))
 
 end FreeFoil.Examples.LambdaPi

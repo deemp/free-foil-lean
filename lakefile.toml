@@ -1,11 +1,11 @@
 name = "free-foil"
 version = "0.1.0"
-defaultTargets = ["FreeFoil", "lambdaPi", "mltt"]
+defaultTargets = ["FreeFoil", "lambdaPi", "mltt", "nbe"]
 testDriver = "freeFoilTests"
 
 [[lean_lib]]
 name = "FreeFoil"
-roots = ["FreeFoil", "FreeFoil.Examples.LambdaPi", "FreeFoil.Examples.LambdaPi.NbE", "FreeFoil.Examples.LambdaPi.Program", "FreeFoil.Examples.SOAS", "FreeFoil.Examples.MLTT"]
+roots = ["FreeFoil", "FreeFoil.Examples.LambdaPi", "FreeFoil.Examples.LambdaPi.NbE", "FreeFoil.Examples.LambdaPi.Program", "FreeFoil.Examples.NbEDemos.Program", "FreeFoil.Examples.SOAS", "FreeFoil.Examples.MLTT"]
 
 [[lean_exe]]
 name = "lambdaPi"
@@ -14,6 +14,10 @@ root = "LambdaPiMain"
 [[lean_exe]]
 name = "mltt"
 root = "MLTTMain"
+
+[[lean_exe]]
+name = "nbe"
+root = "NbEMain"
 
 [[lean_exe]]
 name = "freeFoilTests"

@@ -4,6 +4,7 @@ import FreeFoil.Tests.Derive
 import FreeFoil.Tests.MLTT
 import FreeFoil.Tests.MLTTCache
 import FreeFoil.Tests.NbE
+import FreeFoil.Tests.NbEDemos
 import FreeFoil.Tests.SOAS
 import FreeFoil.Tests.SubstitutionLaws
 
@@ -277,4 +278,5 @@ def main : IO Unit := do
   FreeFoil.Tests.MLTT.run
   FreeFoil.Tests.MLTTCache.run
   FreeFoil.Tests.NbE.run
+  FreeFoil.Tests.NbEDemos.run
   IO.println "Free Foil regression tests passed"

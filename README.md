@@ -59,6 +59,22 @@ open FreeFoil FreeFoil.Examples.LambdaPi
 -- some ("λ x0. (λ x1. x1) x0", "λ x0. x0")
 ```
 
+The `nbe` executable reads one named term and prints its full normal form. Supply
+any free variable names after the term. The λΠ, lambda-let, pairs, and naturals
+commands use the syntax from the pinned `free-foil-NBE` demos.
+
+```sh
+lake exe nbe lambda-pi '(a : \t. t) -> (\y. y) a'
+lake exe nbe booleans 'if true then false else true'
+lake exe nbe let 'let id = \x. x in id id'
+lake exe nbe pairs 'split (a, b) as (x, y) in (y, x)' a b
+lake exe nbe naturals 'natrec (suc a) { zero -> zero; suc p, r -> suc r }' a
+```
+
+The pairs example prints `(b, a)`. The naturals example unfolds once and leaves
+a recursion on the free variable `a`. Bound names in the output are generated
+by scope-safe readback.
+
 ## Define a signature
 
 Import `FreeFoil` for the generic library. A `Signature` gives each operator an arity for ordinary children and an arity for scoped children. Each scoped child has a pattern shape and a list of distinct names in binding order. The pattern shape determines the number of names, so a signature can use zero-name patterns, single binders, or patterns that bind several names. Operator and pattern shape equality are required for `AST.alphaEquiv`.
