@@ -37,6 +37,28 @@ printf '%s\n' 'compute (λ (x, _). x) ((𝕌, 𝕌)) : 𝕌;' | lake exe lambdaP
 
 The example prints `𝕌`. The interpreter evaluates each closed `compute` term to weak-head normal form. It parses type annotations and reports `check` commands as unimplemented.
 
+## Normalize by evaluation
+
+`FreeFoil.NbE` evaluates scope-checked syntax to semantic values with suspended children. A language supplies a `NbE.Rules` record whose elimination rules demand the arguments they need and instantiate scoped children in binding order. Free names start as neutral values. Use `NbE.NoContext` for scope-only evaluation, or supply a scope-indexed context and describe how it extends under a binder.
+
+`NbE.eval` and `NbE.quote` expose the two stages separately. `NbE.nf` runs both and normalizes under binders. `NbE.whnf` reads back ordinary arguments and leaves the head's scoped bodies unevaluated. Both take a recursion budget and can return `.outOfFuel`. Languages can supply a readback refinement rule for features such as type-directed η expansion. The λΠ rules below perform β-reduction and pair elimination.
+
+```lean
+import FreeFoil.Examples.LambdaPi.NbE
+import FreeFoil.Examples.LambdaPi.Program
+
+open FreeFoil FreeFoil.Examples.LambdaPi
+
+#eval (do
+  let raw ← (Parser.parseTerm "λ x. (λ y. y) x").toOption
+  let term ← (AST.fromClosed raw).toOption
+  let weak ← (NbE.whnf nbeRules 64 () term).toOption
+  let full ← (NbE.nf nbeRules 64 () term).toOption
+  let showTerm (t : Term []) := prettyTerm (t.toNamed [] fun name => nomatch name.property)
+  pure (showTerm weak, showTerm full) : Option (String × String))
+-- some ("λ x0. (λ x1. x1) x0", "λ x0. x0")
+```
+
 ## Define a signature
 
 Import `FreeFoil` for the generic library. A `Signature` gives each operator an arity for ordinary children and an arity for scoped children. Each scoped child has a pattern shape and a list of distinct names in binding order. The pattern shape determines the number of names, so a signature can use zero-name patterns, single binders, or patterns that bind several names. Operator and pattern shape equality are required for `AST.alphaEquiv`.
