@@ -1,4 +1,4 @@
-import FreeFoil.Examples.MLTT.Module
+import FreeFoil.Examples.MLTT.Cache
 
 open FreeFoil.Examples.MLTT
 
@@ -36,27 +36,33 @@ private def run (source input : String) : IO UInt32 := do
       IO.eprintln s!"{source}: {error}"
       return 1
 
-private def runProject (paths : List String) : IO UInt32 := do
+private def runProject (paths : List String) (cache : Option System.FilePath := none) : IO UInt32 := do
   let sources ← paths.toArray.mapM fun (path : String) => do
     pure (path, ← IO.FS.readFile path)
-  match runModuleProject sources with
-  | .ok (_, results) =>
+  let result ← match cache with
+    | none => pure ((runModuleProject sources).map Prod.snd)
+    | some directory => pure ((← runCachedModuleProject directory sources).map (·.results))
+  match result with
+  | .ok results =>
     printModuleResults results
     return 0
   | .error error =>
     IO.eprintln error
     return 1
 
+private def usage : IO UInt32 := do
+  IO.eprintln "usage: mltt [file ... | -] | mltt --cache directory file ..."
+  return 2
+
 def main (args : List String) : IO UInt32 := do
   try
     match args with
+    | "--cache" :: directory :: paths =>
+      if paths.isEmpty || paths.contains "-" then usage else runProject paths (some directory)
+    | ["--cache"] => usage
     | [] | ["-"] => run "stdin" (← (← IO.getStdin).readToEnd)
     | [path] => run path (← IO.FS.readFile path)
-    | paths =>
-      if paths.contains "-" then
-        IO.eprintln "usage: mltt [file ... | -]"
-        return 2
-      runProject paths
+    | paths => if paths.contains "-" then usage else runProject paths
   catch error =>
     IO.eprintln s!"mltt: {error}"
     return 1

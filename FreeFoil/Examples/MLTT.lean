@@ -1,1 +1,1 @@
-import FreeFoil.Examples.MLTT.Artifact
+import FreeFoil.Examples.MLTT.Cache

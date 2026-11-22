@@ -138,3 +138,13 @@ Lean callers can construct an unfixed `Parameter` with `{ name, type }`. The pos
 Import `FreeFoil.Examples.MLTT` to use artifacts from Lean. Call `makeArtifact` on a checked environment and module name, then use `encodeArtifact` to produce a versioned JSON string for storage. Read it with `decodeArtifact` and call `loadArtifact` with the module's dependencies already checked or loaded. The restored module retains its declaration identifiers and can be linked or imported like a module checked from source.
 
 Loading verifies dependency checksums and reservations, resolves bound references and free declaration identifiers, and type-checks declarations in order. The artifact preserves a module's discharged declarations and their imports. It records global identifiers at their existing reservations and uses lexical levels for local binders.
+
+### Reuse checked modules across builds
+
+```sh
+lake exe mltt --cache .mltt-cache providers.mltt client.mltt
+```
+
+The cache records each module's parsed source after telescope expansion, its checked artifact, and its command output. A subsequent build revalidates matching artifacts against their checked dependencies. Cached modules replay the stored output of `def`, `check`, and `compute` without running those source commands again. Whitespace and comments leave the parsed source unchanged.
+
+An edit rebuilds the affected module. Its clients can still reuse artifacts if their checked dependencies are unchanged up to α-equivalence. The cache retains identifier ranges as unrelated modules are added. A module that outgrows its reservation receives a new range. Missing, stale, or invalid entries fall back to source checking. The build writes replacement entries after the whole project checks successfully.
