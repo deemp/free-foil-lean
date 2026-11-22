@@ -16,6 +16,7 @@ structure Program where
 structure Parameter where
   name : String
   type : Raw
+  fixedValue : Option Raw := none
 
 structure Module where
   name : String
@@ -196,25 +197,48 @@ where
     eof
     pure ⟨moduleName, commands⟩
 
+private structure HeaderInclude where
+  name : String
+  assignments : Array (String × Raw)
+
 private structure ParameterHeader where
   name : String
-  includes : Array String
+  includes : Array HeaderInclude
   parameters : Array Parameter
 
 private inductive SourceUnit where
   | module (header : ParameterHeader) (imports : Array String) (commands : Array Command)
   | telescope (header : ParameterHeader)
 
+private def headerInclude : Parser HeaderInclude := do
+  keyword "include"
+  let name ← identifier
+  let assignments ← optional do
+    symbol "/"
+    symbol "{"
+    let entries ← optional do
+      let first ← assignment
+      let rest ← many (symbol "," *> assignment)
+      pure (#[first] ++ rest)
+    symbol "}"
+    pure (entries.getD #[])
+  pure ⟨name, assignments.getD #[]⟩
+where
+  assignment : Parser (String × Raw) := do
+    let field ← identifier
+    symbol ":="
+    pure (field, (← term).toRaw)
+
 private def parameterHeader : Parser ParameterHeader := do
   let name ← identifier
-  let includes ← many (keyword "include" *> identifier)
+  let includes ← many headerInclude
   let parameters ← many do
     symbol "("
     let name ← identifier
     symbol ":"
     let type ← term
     symbol ")"
-    pure (⟨name, type.toRaw⟩ : Parameter)
+    pure ({ name, type := type.toRaw } : Parameter)
   let _ ← optional (symbol ";")
   pure ⟨name, includes, parameters⟩
 
@@ -238,6 +262,22 @@ private def atSource (source : Option String) (error : String) : String :=
   | some path => s!"{path}: {error}"
   | none => error
 
+private def refineInclude (included : HeaderInclude) (parameters : Array Parameter) :
+    Except String (Array Parameter) := do
+  let mut assignments : List (String × Raw) := []
+  for (name, value) in included.assignments do
+    if (assignments.lookup name).isSome then
+      throw s!"field '{name}' fixed twice in telescope '{included.name}'"
+    let some field := parameters.find? (·.name == name)
+      | throw s!"telescope '{included.name}' has no field '{name}'"
+    if field.fixedValue.isSome then
+      throw s!"field '{name}' of telescope '{included.name}' is already fixed"
+    assignments := (name, value) :: assignments
+  pure (parameters.map fun field =>
+    match assignments.lookup field.name with
+    | some value => { field with fixedValue := some value }
+    | none => field)
+
 /-- Memoize expanded raw headers. Their field types are checked in each including module. -/
 private partial def expandTelescope (declared : List (String × (Option String × ParameterHeader)))
     (path : List String) (expanded : List (String × Array Parameter)) (name : String) :
@@ -254,9 +294,9 @@ private partial def expandTelescope (declared : List (String × (Option String �
   let mut expanded := expanded
   let mut params := #[]
   for included in header.includes do
-    let (next, fields) ← expandTelescope declared (name :: path) expanded included
+    let (next, fields) ← expandTelescope declared (name :: path) expanded included.name
     expanded := next
-    params := params ++ fields
+    params := params ++ (← (refineInclude included fields).mapError (atSource source))
   params := params ++ header.parameters
   (distinctParameters s!"telescope '{name}'" params).mapError (atSource source)
   pure ((name, params) :: expanded, params)
@@ -279,10 +319,11 @@ private def expandSource (units : Array (Option String × SourceUnit)) :
   for (source, unit) in units do
     if let .module header imports commands := unit then
       let mut params := #[]
-      for name in header.includes do
-        let some fields := expanded.lookup name
-          | throw (atSource source s!"missing telescope '{name}' in module '{header.name}'")
-        params := params ++ fields
+      for included in header.includes do
+        let some fields := expanded.lookup included.name
+          | throw (atSource source
+              s!"missing telescope '{included.name}' in module '{header.name}'")
+        params := params ++ (← (refineInclude included fields).mapError (atSource source))
       params := params ++ header.parameters
       unless header.includes.isEmpty do
         (distinctParameters s!"module '{header.name}'" params).mapError (atSource source)
@@ -351,12 +392,17 @@ def computeQuery (ctx : Context scope) (fuel : Nat) (term : Term scope)
     | .outOfFuel => "evaluation ran out of fuel"
   pure (.computed (display normal))
 
+def resolveTermWith (scope : Scope) (resolve : String → Option (Term scope)) (raw : Raw)
+    (missing : String → String := fun name => s!"unbound name '{name}'") :
+    Except String (Term scope) :=
+  (AST.fromNamedTerms scope resolve raw).mapError fun
+    | .unbound name => missing name
+    | .duplicateBinder names => s!"duplicate name in binder pattern ({String.intercalate ", " names})"
+
 def resolveTerm (scope : Scope) (resolve : String → Option (Name scope)) (raw : Raw)
     (missing : String → String := fun name => s!"unbound name '{name}'") :
     Except String (Term scope) :=
-  (AST.fromNamed scope resolve raw).mapError fun
-    | .unbound name => missing name
-    | .duplicateBinder names => s!"duplicate name in binder pattern ({String.intercalate ", " names})"
+  resolveTermWith scope (fun name => (resolve name).map AST.var) raw missing
 
 private structure Environment where
   scope : Scope

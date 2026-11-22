@@ -199,6 +199,50 @@ private def namedTelescopeTests : IO Unit := do
   expectError "duplicate parameter 'A' in module 'Client'"
     (Parser.parseModules "telescope T (A : 𝕌) module Client include T (A : 𝕌)")
 
+private def telescopeRefinementTests : IO Unit := do
+  let source := "telescope Ops (A : 𝕌) (unit : A) (op : A → A)\n\
+    (law : Id(A, op unit, unit))\n\
+    module Base def U : 𝕌 := 𝟙 def initial : U := tt\n\
+    module Partial include Ops / {A := Base.U} (extra : A) import Base\n\
+    def chosen over (unit, op) : A := op unit\n\
+    def another over (extra) : A := extra\n\
+    telescope UnitOps include Ops / {A := U}\n\
+    module Full include UnitOps / {law := refl(unit), op := λ x ⇒ x, unit := initial}\n\
+    import Base\n\
+    def run over () : A := op unit\n\
+    def witness over () : Id(A, unit, run) := law\n\
+    def shadow over () : 𝕌 → 𝕌 := λ unit ⇒ unit\n\
+    module Client import Partial import Full\n\
+    compute chosen tt (λ x ⇒ x)\n\
+    compute another tt\n\
+    compute run\n\
+    compute shadow 𝟙"
+  let (checked, results) ← expectOk (runModuleProject #[("refinement.mltt", source)])
+  verify "MLTT refinement changed the result of a specialized definition"
+    (results.back? == some ("Client", #[.computed "tt", .computed "tt", .computed "tt", .computed "𝟙"]))
+  let discharged name :=
+    ((checked.find? name).map (·.declarations)).getD [] |>.map (·.parameters)
+  verify "MLTT discharged definitions over fixed or unused fields"
+    (discharged "Partial" == [["unit", "op"], ["extra"]] && discharged "Full" == [[], [], []])
+  expectError "has no field 'unknown'"
+    (Parser.parseModules "telescope T (A : 𝕌) module Bad include T / {unknown := 𝟙}")
+  expectError "field 'A' fixed twice"
+    (Parser.parseModules "telescope T (A : 𝕌) module Bad include T / {A := 𝟙, A := 𝟙}")
+  expectError "field 'A' of telescope 'Fixed' is already fixed"
+    (Parser.parseModules "telescope T (A : 𝕌) telescope Fixed include T / {A := 𝟙}
+      module Bad include Fixed / {A := 𝟙}")
+  let illTyped ← expectOk (Parser.parseModules
+    "telescope T (A : 𝕌) (x : A) module Bad include T / {A := 𝟙, x := 𝟙}")
+  expectError "fixed field 'x': expected type" (runModules illTyped)
+  let dependentType ← expectOk (Parser.parseModules
+    "telescope T (A : 𝕌) (x : A) module Bad include T / {x := tt} import Base
+      module Base def A : 𝕌 := 𝟙")
+  expectError "cannot fix 'x': depends on unfixed parameter 'A'" (runModules dependentType)
+  let dependentValue ← expectOk (Parser.parseModules
+    "telescope T (x : 𝟙) (y : 𝟙) module Bad include T / {x := y} import Base
+      module Base def y : 𝟙 := tt")
+  expectError "cannot fix 'x': depends on unfixed parameter 'y'" (runModules dependentValue)
+
 private def moduleProjectTests : IO Unit := do
   let files := #[
     ("provider.mltt", "module ZProvider def carrier : 𝕌 := 𝟙"),
@@ -429,6 +473,7 @@ def run : IO Unit := do
   programTests
   parameterTests
   namedTelescopeTests
+  telescopeRefinementTests
   moduleProjectTests
   moduleProjectCLITests
   moduleLinkTests

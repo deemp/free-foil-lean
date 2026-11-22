@@ -115,6 +115,24 @@ def chosen over (A, other) : A := other
 
 The fields of each include appear in their declared order, followed by the local parameters. Each including module checks the expanded header in its own scope. Definitions discharge the parameters they use and the dependencies of those parameters, as with an explicit header. Telescope names can be used before their declaration or from another file in the project. Missing telescopes, include cycles, and repeated parameter names are errors.
 
+### Refine an included telescope
+
+An include can fix fields with `/ {field := value, ...}`.
+
+```text
+telescope Choice (A : 𝕌) (point : A)
+
+module UnitChoices include Choice / {A := 𝟙}
+def chosen over (point) : A := point
+
+module UnitChoice include Choice / {A := 𝟙, point := tt}
+def chosen over () : A := point
+```
+
+MLTT checks the assignments in telescope field order with the module's imports and earlier fixed fields in scope. The type and value of a fixed field must be independent of unfixed parameters. Later types and definitions use the fixed values as abbreviations. `UnitChoices.chosen` takes a `𝟙` argument. `UnitChoice.chosen` has type `𝟙` and takes no arguments.
+
+Lean callers can construct an unfixed `Parameter` with `{ name, type }`. The positional constructor takes `fixedValue : Option Raw` as its third field.
+
 ## Save and load checked MLTT modules
 
 Import `FreeFoil.Examples.MLTT` to use artifacts from Lean. Call `makeArtifact` on a checked environment and module name, then use `encodeArtifact` to produce a versioned JSON string for storage. Read it with `decodeArtifact` and call `loadArtifact` with the module's dependencies already checked or loaded. The restored module retains its declaration identifiers and can be linked or imported like a module checked from source.

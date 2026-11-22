@@ -108,8 +108,11 @@ private abbrev ParamTelescope := Telescope String (AST sig)
 
 private abbrev NameTable (scope : Scope) := List (String × Name scope)
 
+private abbrev TermTable (scope : Scope) := List (String × Term scope)
+
 private def resolveModuleTerm (scope : Scope) (parameters locals imports : NameTable scope)
-    (raw : Raw) : Except String (Term scope) :=
+    (raw : Raw) (fixed : TermTable scope := [])
+    (blocked : String → Option String := fun _ => none) : Except String (Term scope) :=
   let matchingKeys (table : NameTable scope) (text : String) :=
     table.filterMap fun (label, key) => if label == text then some key else none
   let candidates text :=
@@ -118,28 +121,54 @@ private def resolveModuleTerm (scope : Scope) (parameters locals imports : NameT
     | none =>
       let localKeys := matchingKeys locals text
       if localKeys.isEmpty then matchingKeys imports text else localKeys
-  let resolve text := do
-    let key :: rest := candidates text | none
-    if rest.all (·.id == key.id) then some key else none
-  resolveTerm scope resolve raw fun text =>
-    if (candidates text).isEmpty then s!"unbound name '{text}'" else s!"ambiguous name '{text}'"
+  let resolve text :=
+    if (blocked text).isSome then none
+    else (fixed.lookup text).orElse fun _ => do
+      let key :: rest := candidates text | none
+      if rest.all (·.id == key.id) then some (.var key) else none
+  resolveTermWith scope resolve raw fun text =>
+    (blocked text).getD (if (candidates text).isEmpty then
+      s!"unbound name '{text}'" else s!"ambiguous name '{text}'")
 
 private def sinkNames (names : NameTable source) (h : source ⊆ target) : NameTable target :=
   names.map fun (label, key) => (label, key.sink h)
 
-private def elaborateParameters (ctx : Context scope) (names imports : NameTable scope)
+private def sinkTerms (terms : TermTable source) (h : source ⊆ target) : TermTable target :=
+  terms.map fun (label, term) => (label, term.sink h)
+
+private def elaborateParameters (ambient : Context base) (imports : NameTable base)
     (fuel : Nat) (parameters : List Parameter) :
-    Except String ((inner : Scope) × ParamTelescope scope inner) :=
-  match parameters with
-  | [] => pure ⟨scope, .nil⟩
-  | param :: rest => do
-    let type ← resolveModuleTerm scope names [] imports param.type
-    (check ctx fuel type Term.univ).mapError toString
-    let fresh := scope.fresh
-    let outer : scope ⊆ fresh.id :: scope := List.subset_cons_self _ _
-    let names := (param.name, fresh) :: sinkNames names outer
-    let ⟨_, tail⟩ ← elaborateParameters (ctx.addLocal type) names (sinkNames imports outer) fuel rest
-    pure ⟨_, .cons param.name type fresh.id scope.nextId_not_mem tail⟩
+    Except String ((inner : Scope) × ParamTelescope base inner × TermTable base) :=
+  go ambient (fun {_} mem => mem) [] [] parameters
+where
+  unfixed := parameters.filterMap fun param =>
+    if param.fixedValue.isNone then some param.name else none
+  go {scope : Scope} (ctx : Context scope) (outer : base ⊆ scope) (names : NameTable scope)
+      (fixed : TermTable base) (remaining : List Parameter) :
+      Except String ((inner : Scope) × ParamTelescope scope inner × TermTable base) :=
+    match remaining with
+    | [] => pure ⟨scope, .nil, fixed⟩
+    | param :: rest => do
+      let type ← resolveModuleTerm scope names [] (sinkNames imports outer) param.type
+        (sinkTerms fixed outer)
+      (check ctx fuel type Term.univ).mapError toString
+      if let some rawValue := param.fixedValue then
+        let dependency label := s!"cannot fix '{param.name}': depends on unfixed parameter '{label}'"
+        let some type := type.restrict base
+          | let support := type.freeVars
+            let label := names.find? fun (_, key) => support.contains key.id
+            throw ((label.map (dependency ∘ Prod.fst)).getD s!"type of fixed field '{param.name}' escapes its scope")
+        let value ← resolveModuleTerm base [] [] imports rawValue fixed fun label =>
+          if unfixed.contains label then some (dependency label) else none
+        (check ambient fuel value type).mapError fun error => s!"fixed field '{param.name}': {error}"
+        -- Keep the checked type available when an abbreviation is used in an inference position.
+        go ctx outer names ((param.name, Term.ann value type) :: fixed) rest
+      else
+        let key := scope.fresh
+        let lift : scope ⊆ key.id :: scope := List.subset_cons_self _ _
+        let names := (param.name, key) :: sinkNames names lift
+        let ⟨_, tail, fixed⟩ ← go (ctx.addLocal type) (fun {_} mem => lift (outer mem)) names fixed rest
+        pure ⟨_, .cons param.name type key.id scope.nextId_not_mem tail, fixed⟩
 
 private def parameterContext (ctx : Context outer) (params : ParamTelescope outer inner) :
     Context inner :=
@@ -204,7 +233,7 @@ private def ModuleState.finish (env : CheckedModules) (state : ModuleState env.s
   ⟨state.scope, state.context, checked :: env.modules.map (·.sink state.outer)⟩
 
 private def runModuleCommand (state : ModuleState base) (mod : Module) (range : NameRange)
-    (params : ParamTelescope base inner) (imports : NameTable base) (fuel : Nat)
+    (params : ParamTelescope base inner) (fixed : TermTable base) (imports : NameTable base) (fuel : Nat)
     (command : Command) : Except String (ModuleState base × CommandResult) := do
   let params := (params.rename state.scope (Name.sink state.outer) (fun rename term =>
     term.rename rename)).telescope
@@ -213,7 +242,9 @@ private def runModuleCommand (state : ModuleState base) (mod : Module) (range : 
   let sinkKey (key : Name state.scope) := key.sink params.scopeSubset
   let localNames := state.declarations.flatMap fun decl =>
     [(decl.name, sinkKey decl.key), (s!"{mod.name}.{decl.name}", sinkKey decl.key)]
-  let imported := sinkNames imports fun {_} mem => params.scopeSubset (state.outer mem)
+  let outer : base ⊆ _ := fun {_} mem => params.scopeSubset (state.outer mem)
+  let imported := sinkNames imports outer
+  let fixed := sinkTerms fixed outer
   let names := namedParams ++ localNames ++ imported
   let applied ← (state.declarations.filter (!·.parameters.isEmpty)).mapM fun decl => do
     let arguments ← decl.parameters.mapM fun label =>
@@ -222,7 +253,7 @@ private def runModuleCommand (state : ModuleState base) (mod : Module) (range : 
       | none => throw s!"missing parameter '{label}' of '{decl.name}'"
     pure (decl.key.id, arguments.foldl Term.app (Term.var (sinkKey decl.key)))
   let resolve raw := do
-    let term ← resolveModuleTerm _ namedParams localNames imported raw
+    let term ← resolveModuleTerm _ namedParams localNames imported raw fixed
     if applied.isEmpty then pure term
     else pure (term.substitute _ (.mapping fun key => (applied.lookup key.id).getD (.var key)))
   let display term := prettyTerm _ term fun key =>
@@ -259,11 +290,12 @@ def checkModule (env : CheckedModules) (range : NameRange) (mod : Module) (fuel 
   let labels := mod.parameters.toList.map Parameter.name
   unless labels.Nodup do
     throw s!"duplicate parameter in module '{mod.name}'"
-  let ⟨_, params⟩ ← elaborateParameters env.context [] imports fuel mod.parameters.toList
+  let ⟨_, params, fixed⟩ ← (elaborateParameters env.context imports fuel mod.parameters.toList).mapError
+    fun error => s!"module '{mod.name}', parameters: {error}"
   let mut state : ModuleState env.scope := ⟨env.scope, fun {_} mem => mem, env.context, []⟩
   let mut results := #[]
   for i in List.finRange mod.commands.size do
-    let (next, result) ← (runModuleCommand state mod range params imports fuel mod.commands[i]).mapError
+    let (next, result) ← (runModuleCommand state mod range params fixed imports fuel mod.commands[i]).mapError
       fun error => s!"module '{mod.name}', command {i.val + 1}: {error}"
     state := next
     results := results.push result

@@ -11,16 +11,16 @@ namespace AST
 
 variable {sig : Signature} {α : Type}
 
-/-- Resolve named syntax into a scope-safe AST. The environment supplies names for free variables. -/
-def fromNamed [DecidableEq α] (scope : Scope) (resolve : α → Option (Name scope))
+/-- Resolve named syntax into a scope-safe AST. Free names can stand for scoped terms. -/
+def fromNamedTerms [DecidableEq α] (scope : Scope) (resolve : α → Option (AST sig scope))
     (term : Syntax sig α) : Except (ResolveError α) (AST sig scope) :=
   match term with
   | .var name =>
     match resolve name with
-    | some id => .ok (.var id)
+    | some term => .ok term
     | none => .error (.unbound name)
   | .node op terms binders bodies => do
-    let terms' ← Vector.ofFnM fun i => fromNamed scope resolve (terms i)
+    let terms' ← Vector.ofFnM fun i => fromNamedTerms scope resolve (terms i)
     let children ← Vector.ofFnM fun i => do
       let binder := binders i
       if ¬binder.names.Nodup then
@@ -28,17 +28,22 @@ def fromNamed [DecidableEq α] (scope : Scope) (resolve : α → Option (Name sc
       let ids := scope.freshen true (binder.names.map fun _ => 0)
       have arity : ids.val.length = binder.names.length := ids.property.1.trans (List.length_map _)
       let binder' : Binder sig Nat := ⟨binder.shape, ids.val, arity.trans binder.arity⟩
-      let resolve' (name : α) : Option (Name (binder'.names ++ scope)) :=
+      let resolve' (name : α) : Option (AST sig (binder'.names ++ scope)) :=
         if h : name ∈ binder.names then
           let i := binder.names.idxOf name
           have bound : i < binder'.names.length := arity ▸ List.idxOf_lt_length_of_mem h
-          some ⟨binder'.names[i], List.mem_append_left _ (List.getElem_mem bound)⟩
+          some (.var ⟨binder'.names[i], List.mem_append_left _ (List.getElem_mem bound)⟩)
         else
-          (resolve name).map (Name.sink fun {_} mem => List.mem_append_right _ mem)
-      let body ← fromNamed (binder'.names ++ scope) resolve' (bodies i)
+          (resolve name).map (AST.sink fun {_} mem => List.mem_append_right _ mem)
+      let body ← fromNamedTerms (binder'.names ++ scope) resolve' (bodies i)
       pure (⟨binder', ids.property.2.1, body⟩ : ScopedAST sig scope)
     pure (.node op terms'.get children.get)
 termination_by structural term
+
+/-- Resolve named syntax into a scope-safe AST, looking up free variable names. -/
+def fromNamed [DecidableEq α] (scope : Scope) (resolve : α → Option (Name scope))
+    (term : Syntax sig α) : Except (ResolveError α) (AST sig scope) :=
+  fromNamedTerms scope (fun name => (resolve name).map AST.var) term
 
 /-- Resolve a term with no free variables. -/
 def fromClosed [DecidableEq α] (term : Syntax sig α) : Except (ResolveError α) (AST sig []) :=
