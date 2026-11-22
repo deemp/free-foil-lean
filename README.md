@@ -135,6 +135,45 @@ open FreeFoil FreeFoil.Examples.LambdaPi
 -- some ("λ x2. alias x2", "λ x2. x2")
 ```
 
+### Compose normalization rules
+
+The `fragments` demo combines functions, pairs, and naturals in the pinned
+monolith syntax. This term applies a function inside a projection and then
+recurses on the resulting numeral. It prints `suc (suc zero)`.
+
+```sh
+lake exe nbe fragments 'natrec (fst ((\x. (suc x, zero)) zero)) { zero -> suc zero; suc (k, r) -> suc r }'
+```
+
+To add an operator family, give it a signature and an `NbE.Fragment` with its
+reduction rules. The rules receive the embedding of their own operators into the
+containing language. Use `position.project` to match a constructor and
+`position.eliminate` to reduce through it. Combine fragments with `Fragment.sum`
+and choose the binding patterns for their combined signature. The same pair
+and natural rules also run in their standalone demos.
+
+This example adds the function fragment to a sum of pairs and naturals.
+
+```lean
+import FreeFoil.Examples.NbEDemos.Program
+
+open FreeFoil FreeFoil.Examples.NbEDemos
+
+def pairAndNaturalRules : NbE.Fragment
+    (Pairs.sig.sum Naturals.sig Monolith.Pattern Monolith.Pattern.binders) :=
+  Pairs.fragment.sum Naturals.fragment
+
+def mixedRules : NbE.Rules Fragments.sig NbE.NoContext :=
+  (Functions.fragment.sum pairAndNaturalRules).rules
+
+#eval (do
+  let raw ← (Fragments.parse "fst ((\\x. (suc x, zero)) zero)").toOption
+  let term ← (AST.fromClosed raw).toOption
+  let normal ← (NbE.nf mixedRules 64 () term).toOption
+  pure (Fragments.pretty (normal.toNamed [] fun name => nomatch name.property)) : Option String)
+-- some "suc zero"
+```
+
 ## Define a signature
 
 Import `FreeFoil` for the generic library. A `Signature` gives each operator an arity for ordinary children and an arity for scoped children. Each scoped child has a pattern shape and a list of distinct names in binding order. The pattern shape determines the number of names, so a signature can use zero-name patterns, single binders, or patterns that bind several names. Operator and pattern shape equality are required for `AST.alphaEquiv`.

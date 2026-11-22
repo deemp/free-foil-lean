@@ -14,33 +14,34 @@ inductive NamedTerm where
 
 derive_free_foil NamedTerm with Unit, arity
 
-private def reduceProjection (evaluator : NbE.Evaluator sig scope)
-    (field : Fin 2) (pair : NbE.Value sig scope) : NbE.Result (Option (NbE.Value sig scope)) :=
-  match pair with
-  | .node .pair fields _ => some <$> evaluator.force (fields field)
-  | _ => pure none
+private def reduceProjection [DecidableEq whole.Op] (position : sig.Embedding whole)
+    (evaluator : NbE.Evaluator whole scope) (field : Fin 2) (pair : NbE.Value whole scope) :
+    NbE.Result (Option (NbE.Value whole scope)) := do
+  let some (fields, _) := position.project .pair pair | return none
+  some <$> evaluator.force (fields field)
 
-def nbeRules : NbE.Rules sig NbE.NoContext where
-  reduce evaluator _ op terms children :=
+def fragment : NbE.Fragment sig where
+  reduce position evaluator op terms children :=
     match op with
-    | .first => evaluator.eliminate .first terms children 0 (reduceProjection evaluator 0)
-    | .second => evaluator.eliminate .second terms children 0 (reduceProjection evaluator 1)
-    | .split => evaluator.eliminate .split terms children 0 fun
-      | .node .pair fields _ =>
-        let body := children 0
-        some <$> evaluator.instantiate body (fun i => fields (Fin.cast body.binder.arity i))
-      | _ => pure none
+    | .first => position.eliminate evaluator .first terms children 0 (reduceProjection position evaluator 0)
+    | .second => position.eliminate evaluator .second terms children 0 (reduceProjection position evaluator 1)
+    | .split => position.eliminate evaluator .split terms children 0 fun value => do
+      let some (fields, _) := position.project .pair value | return none
+      some <$> evaluator.instantiateAtArity (children 0) fields
     | _ => pure none
-  extend _ _ _ _ _ _ := pure ()
   isHead op _ := match op with
     | .first | .second | .split => true
     | _ => false
-  eta op := match op with
+  eta position op := match op with
     | .pair => some {
       term i _ other :=
-        if i == 0 then .node .first (fun _ => .ready other) Fin.elim0
-        else .node .second (fun _ => .ready other) Fin.elim0
-      body i _ _ _ := Fin.elim0 i }
+        if (Fin.cast (position.terms .pair) i) == 0 then
+          position.node .first (fun _ => .ready other) Fin.elim0
+        else
+          position.node .second (fun _ => .ready other) Fin.elim0
+      body i _ _ _ := Fin.elim0 (Fin.cast (position.scopes .pair) i) }
     | _ => none
+
+def nbeRules : NbE.Rules sig NbE.NoContext := fragment.rules
 
 end FreeFoil.Examples.NbEDemos.Pairs

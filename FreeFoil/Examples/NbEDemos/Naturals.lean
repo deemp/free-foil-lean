@@ -13,23 +13,23 @@ inductive NamedTerm where
 
 derive_free_foil NamedTerm with Unit, arity
 
-def nbeRules : NbE.Rules sig NbE.NoContext where
-  reduce evaluator _ op terms children :=
+def fragment : NbE.Fragment sig where
+  reduce position evaluator op terms children :=
     match op with
-    | .natrec => evaluator.eliminate .natrec terms children 0 fun
-      | .node .zero _ _ => some <$> evaluator.force (terms 1)
-      | .node .suc args _ =>
+    | .natrec => position.eliminate evaluator .natrec terms children 0 fun value => do
+      if (position.project .zero value).isSome then
+        some <$> evaluator.force (terms 1)
+      else if let some (args, _) := position.project .suc value then
         let pred := args 0
-        let step := children 0
-        -- The recursive call uses the same branches and is forced only if the step demands it.
-        let recursive : NbE.Thunk sig _ := .node .natrec (Fin.cases pred fun _ => terms 1) children
-        let bound : Fin 2 → NbE.Thunk sig _ := Fin.cases pred (fun _ => recursive)
-        some <$> evaluator.instantiate step (fun i => bound (Fin.cast step.binder.arity i))
-      | _ => pure none
+        -- Reuse both branches and suspend the recursive result.
+        let recursive := position.node .natrec (Fin.cases pred fun _ => terms 1) children
+        some <$> evaluator.instantiateAtArity (children 0) (Fin.cases pred fun _ : Fin 1 => recursive)
+      else pure none
     | _ => pure none
-  extend _ _ _ _ _ _ := pure ()
   isHead op i := match op with
     | .natrec => i == 0
     | _ => false
+
+def nbeRules : NbE.Rules sig NbE.NoContext := fragment.rules
 
 end FreeFoil.Examples.NbEDemos.Naturals

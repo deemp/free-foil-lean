@@ -7,6 +7,7 @@ import FreeFoil.Tests.NbE
 import FreeFoil.Tests.NbEConversion
 import FreeFoil.Tests.NbEDefinitions
 import FreeFoil.Tests.NbEDemos
+import FreeFoil.Tests.NbEFragments
 import FreeFoil.Tests.SOAS
 import FreeFoil.Tests.SubstitutionLaws
 
@@ -283,4 +284,5 @@ def main : IO Unit := do
   FreeFoil.Tests.NbEConversion.run
   FreeFoil.Tests.NbEDefinitions.run
   FreeFoil.Tests.NbEDemos.run
+  FreeFoil.Tests.NbEFragments.run
   IO.println "Free Foil regression tests passed"

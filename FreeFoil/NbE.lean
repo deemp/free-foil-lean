@@ -96,6 +96,7 @@ def Closure.openWith (closure : Closure sig scope) (names : List Nat)
 
 inductive Error where
   | outOfFuel
+  | invalidBinder (expected actual : Nat)
   deriving DecidableEq, Repr
 
 abbrev Result := Except Error
@@ -117,6 +118,14 @@ structure Evaluator (sig : Signature) (scope : Scope) where
 def Evaluator.instantiate (evaluator : Evaluator sig scope) (closure : Closure sig scope)
     (args : Fin closure.binder.names.length → Thunk sig scope) : Result (Value sig scope) :=
   evaluator.force (closure.instantiate args)
+
+/-- Instantiate a body whose language rule supplies a fixed number of arguments. -/
+def Evaluator.instantiateAtArity (evaluator : Evaluator sig scope) (closure : Closure sig scope)
+    (args : Fin arity → Thunk sig scope) : Result (Value sig scope) :=
+  if equal : closure.binder.names.length = arity then
+    evaluator.instantiate closure (fun i => args (Fin.cast equal i))
+  else
+    .error (.invalidBinder arity closure.binder.names.length)
 
 /-- Match the principal operand of an elimination. A definition preserves the
 stuck elimination on its folded side and suspends the same elimination on its body. -/

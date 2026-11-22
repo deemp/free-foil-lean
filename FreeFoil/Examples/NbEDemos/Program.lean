@@ -4,6 +4,7 @@ import FreeFoil.Examples.NbEDemos.Booleans
 import FreeFoil.Examples.NbEDemos.LambdaLet
 import FreeFoil.Examples.NbEDemos.Pairs
 import FreeFoil.Examples.NbEDemos.Naturals
+import FreeFoil.Examples.NbEDemos.Fragments
 
 namespace FreeFoil.Examples.NbEDemos
 
@@ -49,6 +50,7 @@ def Demo.normalize (demo : Demo sig) (fuel : Nat) (source : String)
   let term ← (context.resolve raw).mapError resolveMessage
   let result ← (NbE.nf demo.rules fuel () term).mapError fun
     | .outOfFuel => "evaluation ran out of fuel"
+    | .invalidBinder expected actual => s!"expected a pattern binding {expected} names, got {actual}"
   pure (demo.pretty (result.toNamed context.scope context.label))
 
 private def parseTerm (parser : Parser α) (source : String) : Except String α :=
@@ -221,5 +223,15 @@ def naturals : Demo Naturals.sig where
   parse := parseTerm (Naturals.NamedTerm.toRaw <$> naturalsTerm)
   pretty := renderNaturals false ∘ Naturals.NamedTerm.fromRaw
   rules := Naturals.nbeRules
+
+def fragments : Demo Fragments.sig where
+  parse := Fragments.parse
+  pretty := Fragments.pretty
+  rules := Fragments.nbeRules
+
+def monolith : Demo Monolith.sig where
+  parse := Monolith.parse
+  pretty := Monolith.pretty
+  rules := Monolith.nbeRules
 
 end FreeFoil.Examples.NbEDemos

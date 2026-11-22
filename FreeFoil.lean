@@ -4,5 +4,6 @@ import FreeFoil.Named
 import FreeFoil.NbE
 import FreeFoil.NbE.Conversion
 import FreeFoil.NbE.Definitions
+import FreeFoil.NbE.Fragment
 import FreeFoil.SubstitutionLaws
 import FreeFoil.Telescope

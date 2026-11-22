@@ -53,7 +53,7 @@ private def demandTests : IO Unit := do
   let diverging ← closed omega
   match NbE.nf nbeRules 32 () diverging with
   | .error .outOfFuel => pure ()
-  | .ok _ => throw (IO.userError "normalizing omega did not exhaust the budget")
+  | _ => throw (IO.userError "normalizing omega did not exhaust the budget")
   let term ← closed s!"(λ x. 𝕌) ({omega})"
   let expected ← closed "𝕌"
   check "normalization demanded an unused argument"
@@ -66,7 +66,7 @@ private def demandTests : IO Unit := do
     ((← expectOk (NbE.whnf nbeRules 32 () term)).alphaEquiv term)
   match NbE.nf nbeRules 32 () term with
   | .error .outOfFuel => pure ()
-  | .ok _ => throw (IO.userError "full normalization ignored a diverging binder body")
+  | _ => throw (IO.userError "full normalization ignored a diverging binder body")
 
 private def openScope : Scope := [1]
 private def global : Name openScope := ⟨1, by simp [openScope]⟩

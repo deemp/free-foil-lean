@@ -93,7 +93,7 @@ def run : IO Unit := do
   let divergence ← parseIn lambdaPi names s!"f ({omega})"
   match NbE.convertible lambdaPi.rules 32 () divergence divergence with
   | .error .outOfFuel => pure ()
-  | .ok _ => throw (IO.userError "conversion returned an answer for a demanded diverging child")
+  | _ => throw (IO.userError "conversion did not report fuel exhaustion for a demanded diverging child")
   checkEta lambdaPi names "\\x. f x" "f"
   contextTests names
   environmentTest names
