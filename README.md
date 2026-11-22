@@ -291,6 +291,36 @@ each.
 Mixed multiplication took 191 µs with a single signature and 307 µs with
 composed fragments in the same run.
 
+## Benchmark lambda-n-ways
+
+```sh
+git submodule update --init lambda-n-ways
+lake exe lambdaNWaysBench --samples 5
+```
+
+The benchmark ports the six active groups from `bench/Main.lhs` at the
+pinned `lambda-n-ways` revision `1f507f589ec12366757fdc3ee1fa499855615df3`.
+It uses Lean's eager Free Foil substitution normalizer, corresponding to
+the upstream `FreeScoped.Eager.Foil` normalization algorithm, and Lean's
+scope-safe conversion and α-equivalence. [Upstream harness](https://github.com/KarinaTyulebaeva/lambda-n-ways/blob/1f507f589ec12366757fdc3ee1fa499855615df3/bench/Main.lhs)
+[Upstream Free Foil implementation](https://github.com/KarinaTyulebaeva/lambda-n-ways/blob/1f507f589ec12366757fdc3ee1fa499855615df3/lib/FreeScoped/Eager/Foil.hs)
+
+| Group | Timed work |
+| --- | --- |
+| `random15`, `random20` | Normalize each of the 100 terms and compare it to its reference normal form up to α-equivalence. |
+| `conv` | Convert the parsed Lennart term to a scope-safe AST and count all its nodes. |
+| `nf` | Normalize the Lennart factorial program and compare the result to the reference Church false. |
+| `aeq` | Compare the Lennart term to a copy with shifted binder identifiers. |
+| `aeqs` | Compare the Lennart term to itself. |
+
+The executable reports the median elapsed time per group in nanoseconds.
+Use `--samples 1` for a single pass through the corpus.
+It parses the fixtures and prepares the inputs and reference forms before
+timing. Each normalization sample traverses the complete results through
+the reference comparisons and exits with an error if any comparison fails.
+It reads `lambda-n-ways/lams` by default. Use `--corpus LAMS_DIR` to supply
+another directory containing the three `.lam` and three `.nf.lam` files.
+
 ## Define a signature
 
 Import `FreeFoil` for the generic library. A `Signature` gives each operator an arity for ordinary children and an arity for scoped children. Each scoped child has a pattern shape and a list of distinct names in binding order. The pattern shape determines the number of names, so a signature can use zero-name patterns, single binders, or patterns that bind several names. Operator and pattern shape equality are required for `AST.alphaEquiv`.

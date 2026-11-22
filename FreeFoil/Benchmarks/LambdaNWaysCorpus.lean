@@ -1,7 +1,7 @@
 import FreeFoil.Examples.LambdaPi
 import FreeFoil.Examples.TermParser
 
-namespace FreeFoil.Benchmarks.NbECorpus
+namespace FreeFoil.Benchmarks.LambdaNWaysCorpus
 
 open FreeFoil.Examples.LambdaPi
 open FreeFoil.Examples.TermParser
@@ -33,27 +33,29 @@ where
     Raw.app (Raw.lam entry.1 body) entry.2
   atom := (Raw.var <$> identifier) <|> parenthesized term
 
-private def readTerm (whereFrom source : String) : IO (Term []) := do
-  let raw ← IO.ofExcept <| ((trivia *> term <* eof).run source).mapError
-    (fun error => s!"{whereFrom}: {error}")
-  IO.ofExcept <| (AST.fromClosed raw).mapError (fun error => s!"{whereFrom}: {reprStr error}")
+structure Fixture where
+  location : String
+  raw : Raw
 
-private def readGroup (path : System.FilePath) : IO (Array (Term [])) := do
+def Fixture.close (fixture : Fixture) : Except String (Term []) :=
+  (AST.fromClosed fixture.raw).mapError (fun error => s!"{fixture.location}: {reprStr error}")
+
+private def parse (location source : String) : IO Fixture := do
+  let raw ← IO.ofExcept <| ((trivia *> term <* eof).run source).mapError
+    (fun error => s!"{location}: {error}")
+  return ⟨location, raw⟩
+
+def readTerm (path : System.FilePath) : IO Fixture := do
+  parse (toString path) (← IO.FS.readFile path)
+
+def readGroup (path : System.FilePath) : IO (Array Fixture) := do
   let lines ← IO.FS.lines path
   let mut terms := #[]
   for (line, index) in lines.zipIdx do
     let line := line.trimAscii.toString
     unless line.isEmpty || line.startsWith "--" do
-      terms := terms.push (← readTerm s!"{path}:{index + 1}" line)
+      terms := terms.push (← parse s!"{path}:{index + 1}" line)
   if terms.isEmpty then throw (IO.userError s!"{path}: no lambda terms")
   return terms
 
-/-- Read the three untyped lambda-n-ways fixtures used by the pinned upstream harness. -/
-def load (dir : System.FilePath) : IO (Array (String × Array (Term []))) := do
-  let factorial := dir / "lennart.lam"
-  let factorialTerm ← readTerm (toString factorial) (← IO.FS.readFile factorial)
-  let random15 ← readGroup (dir / "random15.lam")
-  let random20 ← readGroup (dir / "random20.lam")
-  return #[("factorial", #[factorialTerm]), ("random15", random15), ("random20", random20)]
-
-end FreeFoil.Benchmarks.NbECorpus
+end FreeFoil.Benchmarks.LambdaNWaysCorpus

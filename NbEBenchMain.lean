@@ -1,8 +1,8 @@
 import FreeFoil.Benchmarks.NbEBaselines
-import FreeFoil.Benchmarks.NbECorpus
+import FreeFoil.Benchmarks.LambdaNWaysCorpus
 import FreeFoil.Examples.NbEDemos.Program
 
-open FreeFoil FreeFoil.Examples
+open FreeFoil FreeFoil.Examples FreeFoil.Benchmarks.LambdaNWaysCorpus
 
 private def fuel := 200000
 
@@ -149,5 +149,9 @@ def main (args : List String) : IO Unit := do
   IO.println s!"Median of {options.samples} samples per implementation"
   builtins options.samples
   if let some dir := options.corpus then
-    for (name, inputs) in ← Benchmarks.NbECorpus.load dir do
+    let factorial ← IO.ofExcept (← readTerm (dir / "lennart.lam")).close
+    runLambda options.samples "factorial" #[factorial] false
+    for name in ["random15", "random20"] do
+      let inputs ← (← readGroup (dir / (name ++ ".lam"))).mapM fun input =>
+        IO.ofExcept input.close
       runLambda options.samples name inputs false
