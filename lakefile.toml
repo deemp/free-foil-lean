@@ -20,6 +20,10 @@ name = "nbe"
 root = "NbEMain"
 
 [[lean_exe]]
+name = "nbeBench"
+root = "NbEBenchMain"
+
+[[lean_exe]]
 name = "freeFoilTests"
 root = "Test"
 needs = ["mltt"]

@@ -201,6 +201,66 @@ singleton, and a dependent pair of singletons have canonical inhabitants.
 Conversion also compares a function or pair with its η-expansion. Readback
 preserves neutral functions and pairs of non-singleton type.
 
+### Benchmark normalization
+
+```sh
+lake exe nbeBench --samples 5
+```
+
+The built-in workloads follow the pinned upstream benchmark suite.
+They compare generic λΠ NbE, a monomorphic closure evaluator, and a
+capture-avoiding substitution normalizer on the same scoped ASTs. The
+workloads include Church exponentiation, a chain of identity redexes,
+sequential lets encoded as applications, and nested Π binders with identity
+domains. A mixed-language workload uses a function, a pair split, and
+natural-number recursion to multiply 8 by 12. The composed and flat rules
+both normalize that program. [Upstream workloads](https://github.com/p50000/free-foil-NBE/blob/75e7855a6dc03723ff0198f55774eda50e627249/bench/Main.hs)
+
+The benchmark checks α-equivalence for every input before timing a workload.
+Each sample measures full normalization and a traversal of the result to
+count its syntax nodes. Parsing, scope checking, and comparison are outside
+the timed interval. The reported time is the median per workload, including
+all its terms.
+
+The optional lambda-n-ways corpus compares the two NbE implementations on the
+factorial program and the `random15` and `random20` groups. Use the fork
+revision pinned in the upstream harness. [Corpus provenance](https://github.com/p50000/free-foil-NBE/blob/75e7855a6dc03723ff0198f55774eda50e627249/bench/lambda-n-ways/README.md)
+
+```sh
+corpus_dir=$(mktemp -d)
+corpus_revision=1f507f589ec12366757fdc3ee1fa499855615df3
+for term_group in lennart random15 random20; do
+  curl --fail --silent --show-error --location \
+    "https://raw.githubusercontent.com/KarinaTyulebaeva/lambda-n-ways/$corpus_revision/lams/$term_group.lam" \
+    --output "$corpus_dir/$term_group.lam"
+done
+lake exe nbeBench --samples 5 --corpus "$corpus_dir"
+```
+
+The default build and test targets run without the corpus.
+
+#### Sample baseline
+
+One native run used Lean 4.35.0 (Release), GCC 16.2.0, and Ubuntu 24.04.3 LTS
+on an Intel Core i7-1165G7 (x86-64, 8 logical CPUs). Each entry is the median
+of five samples in microseconds. The random-group timings cover 100 terms
+each.
+
+| Workload | Generic NbE | Monomorphic NbE | Substitution |
+| --- | ---: | ---: | ---: |
+| Church power 2⁹ | 1431 | 640 | 4332 |
+| Nested identity redexes, depth 256 | 137 | 65 | 77 |
+| Nested lets, depth 64 | 35 | 16 | 2396 |
+| Nested lets, depth 256 | 143 | 65 | 71301 |
+| Nested Π, depth 64 | 206 | 145 | 73 |
+| Nested Π, depth 256 | 1501 | 1286 | 369 |
+| Factorial | 143169 | 71772 | — |
+| random15 | 5091 | 2284 | — |
+| random20 | 5652 | 2312 | — |
+
+Mixed multiplication took 191 µs with a single signature and 307 µs with
+composed fragments in the same run.
+
 ## Define a signature
 
 Import `FreeFoil` for the generic library. A `Signature` gives each operator an arity for ordinary children and an arity for scoped children. Each scoped child has a pattern shape and a list of distinct names in binding order. The pattern shape determines the number of names, so a signature can use zero-name patterns, single binders, or patterns that bind several names. Operator and pattern shape equality are required for `AST.alphaEquiv`.
