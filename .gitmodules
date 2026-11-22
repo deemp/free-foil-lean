@@ -1,3 +1,6 @@
 [submodule "free-foil"]
 	path = free-foil
 	url = https://github.com/fizruk/free-foil
+[submodule "free-foil-NBE"]
+	path = free-foil-NBE
+	url = https://github.com/p50000/free-foil-NBE
