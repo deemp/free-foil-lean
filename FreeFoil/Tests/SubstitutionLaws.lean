@@ -54,4 +54,30 @@ example :
       composed = true :=
   openTerm.substituteRefreshed_compose first second
 
+private def lexical (term : AST exampleSig scope) : Lexical exampleSig :=
+  Lexical.interpret term.syntaxTree 0 Lexical.freeAssignment
+
+private def shadowedPair : AST exampleSig [0] :=
+  bindPair 1 2 (by decide) (bindPair 1 3 (by decide)
+    (pair (.var ⟨1, by simp⟩) (.var ⟨0, by simp⟩)))
+
+private def renamedPair : AST exampleSig [0] :=
+  bindPair 4 5 (by decide) (bindPair 6 7 (by decide)
+    (pair (.var ⟨6, by simp⟩) (.var ⟨0, by simp⟩)))
+
+example : lexical shadowedPair = lexical renamedPair :=
+  (shadowedPair.alphaEquiv_iff_lexical_eq renamedPair).mp (by decide)
+
+private def freeUse (name : Name [0, 9]) : AST exampleSig [0, 9] :=
+  bindPair 1 2 (by decide) (.var ⟨name.id, by simp [name.property]⟩)
+
+example : lexical (freeUse ⟨0, by simp⟩) ≠ lexical (freeUse ⟨9, by simp⟩) :=
+  mt (AST.alphaEquiv_iff_lexical_eq (freeUse ⟨0, by simp⟩) (freeUse ⟨9, by simp⟩)).mpr (by decide)
+
+private def firstPosition : AST exampleSig [0] :=
+  bindPair 1 2 (by decide) (pair (.var ⟨0, by simp⟩) (.var ⟨1, by simp⟩))
+
+example : lexical openTerm ≠ lexical firstPosition :=
+  mt (openTerm.alphaEquiv_iff_lexical_eq firstPosition).mpr (by decide)
+
 end FreeFoil.Tests.SubstitutionLaws
