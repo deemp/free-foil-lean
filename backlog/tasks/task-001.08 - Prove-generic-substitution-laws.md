@@ -5,11 +5,12 @@ status: Done
 assignee:
   - codex
 created_date: '2026-11-21T21:07:52Z'
-updated_date: '2026-11-21 21:45'
+updated_date: '2026-11-22 16:57'
 labels: []
 dependencies: []
 references:
-  - plan.md
+  - >-
+    https://github.com/fizruk/free-foil/blob/fdfbeef/haskell/free-foil/test/laws/Control/Monad/Free/Foil/Laws.hs#L411
 modified_files:
   - FreeFoil.lean
   - FreeFoil/Alpha.lean

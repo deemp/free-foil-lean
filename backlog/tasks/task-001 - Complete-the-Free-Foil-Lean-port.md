@@ -4,13 +4,13 @@ title: Complete the Free Foil Lean port
 status: Done
 assignee: []
 created_date: '2026-11-21T21:05:13Z'
-updated_date: '2026-11-22 10:18'
+updated_date: '2026-11-22 16:57'
 labels: []
 dependencies: []
 references:
-  - plan.md
   - FreeFoil/Examples/LambdaPi.lean
   - 'https://github.com/fizruk/free-foil/tree/fdfbeef'
+  - README.md
 type: feature
 ordinal: 1000
 ---
@@ -18,7 +18,7 @@ ordinal: 1000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-The Lean library already checks scopes and provides capture-avoiding substitution, α-equivalence, scope restriction, and named-syntax conversion. Complete the examples and reusable binder machinery in plan.md using upstream revision fdfbeef as the behavior and fixture reference. Follow the milestone order in plan.md and begin with λΠ. The generic substitution proofs can proceed alongside the ports.
+Complete the Free Foil Lean port in eight subtasks, beginning with the λΠ example and continuing through dependent telescopes, syntax generation, SOAS, and MLTT with checked artifacts. Use upstream revision `fdfbeef` as the behavior and fixture reference. The generic substitution proofs can proceed alongside the example ports.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

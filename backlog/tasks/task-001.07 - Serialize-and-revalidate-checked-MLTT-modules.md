@@ -5,12 +5,13 @@ status: Done
 assignee:
   - codex
 created_date: '2026-11-21T21:07:51Z'
-updated_date: '2026-11-22 10:17'
+updated_date: '2026-11-22 16:57'
 labels: []
 dependencies:
   - TASK-001.06
 references:
-  - plan.md
+  - >-
+    https://github.com/fizruk/free-foil/blob/fdfbeef/haskell/free-foil/src/Control/Monad/Free/Foil/Artifact.hs
 modified_files:
   - FreeFoil/Examples/MLTT.lean
   - FreeFoil/Examples/MLTT/Artifact.lean

@@ -5,12 +5,12 @@ status: Done
 assignee:
   - codex-syntax_generation
 created_date: '2026-11-21T21:07:51Z'
-updated_date: '2026-11-21 22:05'
+updated_date: '2026-11-22 16:57'
 labels: []
 dependencies:
   - TASK-001.04
 references:
-  - plan.md
+  - 'https://github.com/fizruk/free-foil/blob/fdfbeef/haskell/mltt/README.md'
 modified_files:
   - FreeFoil/Examples/MLTT.lean
   - FreeFoil/Examples/MLTT/Eval.lean

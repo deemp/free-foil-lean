@@ -5,11 +5,14 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-11-21T21:07:50Z'
-updated_date: '2026-11-21T21:12:15Z'
+updated_date: '2026-11-22 16:57'
 labels: []
 dependencies: []
 references:
-  - plan.md
+  - >-
+    https://github.com/fizruk/free-foil/blob/fdfbeef/haskell/lambda-pi/grammar/LambdaPi/Syntax.cf
+  - >-
+    https://github.com/fizruk/free-foil/blob/fdfbeef/haskell/lambda-pi/src/Language/LambdaPi/Impl/FreeFoilTH.hs
 parent_task_id: TASK-001
 type: feature
 ordinal: 2000
@@ -18,7 +21,7 @@ ordinal: 2000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Add upstream λΠ pattern and program support to the current Lean example. Use the grammar and interpreter pinned in plan.md.
+Add upstream λΠ pattern and program support to the Lean example. Use the upstream grammar and interpreter at revision `fdfbeef` as the reference.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

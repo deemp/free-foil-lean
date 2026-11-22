@@ -5,12 +5,13 @@ status: Done
 assignee:
   - codex-syntax_generation
 created_date: '2026-11-21T21:07:50Z'
-updated_date: '2026-11-21 21:43'
+updated_date: '2026-11-22 16:57'
 labels: []
 dependencies:
   - TASK-001.02
 references:
-  - plan.md
+  - >-
+    https://github.com/fizruk/free-foil/blob/fdfbeef/haskell/free-foil/src/Control/Monad/Free/Foil/TH/MkFreeFoil.hs
 modified_files:
   - FreeFoil/Derive.lean
   - FreeFoil/Examples/LambdaPi.lean

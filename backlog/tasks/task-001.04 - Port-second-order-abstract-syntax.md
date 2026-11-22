@@ -5,12 +5,12 @@ status: Done
 assignee:
   - Codex
 created_date: '2026-11-21T21:07:51Z'
-updated_date: '2026-11-21 21:53'
+updated_date: '2026-11-22 16:57'
 labels: []
 dependencies:
   - TASK-001.03
 references:
-  - plan.md
+  - 'https://github.com/fizruk/free-foil/blob/fdfbeef/haskell/soas/README.md'
 modified_files:
   - FreeFoil/Derive.lean
   - FreeFoil/Examples/SOAS.lean
