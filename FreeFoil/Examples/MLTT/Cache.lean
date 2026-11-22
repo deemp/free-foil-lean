@@ -61,6 +61,15 @@ private def writeCacheFile [ToJson α] (directory path : FilePath) (value : α) 
 private def entryPath (directory : FilePath) (name : String) : FilePath :=
   directory / s!"module-{hash name}.json"
 
+private def readReservations (directory : FilePath) : IO (Option Reservations) := do
+  let stored ← readCacheFile (α := Reservations) (directory / "reservations.json")
+  return stored.filter validReservations
+
+/-- The first identifier above the recorded cache reservations, including unused slots. -/
+def cachedReservationEnd (directory : FilePath) : IO Nat := do
+  let reservations := (← readReservations directory).getD []
+  return reservations.foldl (fun high (_, range) => max high range.stop) 0
+
 private def definitionCount (mod : Module) : Nat :=
   mod.commands.countP fun
     | .define .. | .defineOver .. => true
@@ -108,8 +117,7 @@ structure CachedModuleProject where
 private def checkWithCache (directory : FilePath) (plan : Array PlannedModule) (fuel : Nat) :
     ExceptT String IO CachedModuleProject := do
   let index := directory / "reservations.json"
-  let stored ← readCacheFile (α := Reservations) index
-  let previous := (stored.filter validReservations).getD []
+  let previous := (← readReservations directory).getD []
   let (plan, reservations) := reserve plan previous
   let mut environment := CheckedModules.empty
   let mut results := #[]
@@ -153,5 +161,54 @@ def runCachedModuleProject (directory : FilePath) (sources : Array (String × St
     (checkWithCache directory plan fuel).run
   finally
     lock.unlock
+
+private partial def loadCachedDependencies (directory : FilePath) (reservations : Reservations)
+    (fuel : Nat) (env : CheckedModules) (name : String) (visiting : List String) :
+    ExceptT String IO CheckedModules := do
+  if (env.find? name).isSome then return env
+  if visiting.contains name then
+    throw s!"cyclic cached module imports: {String.intercalate " -> " (name :: visiting).reverse}"
+  let path := entryPath directory name
+  let some cached ← readCacheFile (α := CacheEntry) path
+    | throw s!"missing or invalid cached module '{name}' at '{path}'"
+  let artifact ← liftExcept ((decodeArtifact cached.artifact).mapError fun error =>
+    s!"cached module '{name}' at '{path}': {error}")
+  unless artifact.payload.name == name do
+    throw s!"cached module '{name}' at '{path}' contains '{artifact.payload.name}'"
+  unless reservations.lookup name == some artifact.payload.range do
+    throw s!"cached module '{name}' at '{path}' does not match its recorded reservation"
+  let mut checked := env
+  for dependency in artifact.payload.imports do
+    checked ← loadCachedDependencies directory reservations fuel checked dependency (name :: visiting)
+  liftExcept ((loadArtifact checked artifact fuel).mapError fun error =>
+    s!"cached module '{name}' at '{path}': {error}")
+
+/-- Restore a cached module and any missing imports in dependency order. The builder's
+lock keeps reservations and entries consistent throughout the load. -/
+private def loadCachedModule (directory : FilePath) (env : CheckedModules) (name : String)
+    (fuel : Nat) : IO (Except String CheckedModules) := do
+  let load : ExceptT String IO CheckedModules := do
+    let some reservations ← readReservations directory
+      | throw s!"missing or invalid cache reservation index at '{directory / "reservations.json"}'"
+    loadCachedDependencies directory reservations fuel env name []
+  let lockPath := directory / "cache.lock"
+  if ← lockPath.pathExists then
+    let lock ← IO.FS.Handle.mk lockPath .read
+    lock.lock (exclusive := false)
+    try load.run finally lock.unlock
+  else load.run
+
+/-- Bring a module's own exports into scope. If needed, validate its cached artifacts before
+publishing any additions to the session. -/
+def ReplSession.importModule (session : ReplSession) (name : String)
+    (cache : Option FilePath := none) (fuel : Nat := 1024) : IO (Except String ReplSession) := do
+  if (session.environment.find? name).isSome then
+    return session.addImport session.environment name
+  let some directory := cache | return .error s!"unknown module '{name}'"
+  try
+    return (← loadCachedModule directory session.environment name fuel).bind fun loaded =>
+      session.addImport loaded name
+  catch error =>
+    return .error (toString error)
 
 end FreeFoil.Examples.MLTT

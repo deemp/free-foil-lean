@@ -9,6 +9,10 @@ inductive Command where
   | check (term type : Raw)
   | compute (term : Raw)
 
+inductive SessionInput where
+  | importModule (name : String)
+  | command (value : Command)
+
 structure Program where
   moduleName : Option String
   commands : Array Command
@@ -187,6 +191,19 @@ where
 
 def parseTerm (source : String) : Except String Raw :=
   (trivia *> (NamedTerm.toRaw <$> term) <* eof).run source
+
+/-- Parse one interactive instruction or skip a line containing only trivia. -/
+def parseSessionLine (source : String) : Except String (Option SessionInput) :=
+  parser.run source
+where
+  parser : Parser (Option SessionInput) := do
+    trivia
+    (eof *> pure none) <|> do
+      let input ← (keyword "import" *> (SessionInput.importModule <$> identifier)) <|>
+        (SessionInput.command <$> command)
+      let _ ← optional (symbol ";")
+      eof
+      pure (some input)
 
 def parseProgram (source : String) : Except String Program := parser.run source
 where

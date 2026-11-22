@@ -197,12 +197,9 @@ private structure ModuleState (base : Scope) where
   context : Context scope
   declarations : List (CheckedDeclaration scope)
 
-private def ModuleState.extend (state : ModuleState base) (range : NameRange)
+private def ModuleState.extendAt (state : ModuleState base) (id : Nat)
     (name : String) (parameters : List String) (type value : Term state.scope) :
     Except String (ModuleState base) := do
-  let id := range.start + state.declarations.length
-  unless id < range.stop do
-    throw s!"reserved name range exhausted at declaration '{name}'"
   if fresh : id ∉ state.scope then
     let outer : state.scope ⊆ id :: state.scope := List.subset_cons_self _ _
     let key : Name (id :: state.scope) := ⟨id, by simp⟩
@@ -210,6 +207,14 @@ private def ModuleState.extend (state : ModuleState base) (range : NameRange)
       state.context.extend id fresh type (some value),
       ⟨name, key, parameters⟩ :: state.declarations.map (·.sink outer)⟩
   else throw s!"declaration identifier {id} for '{name}' is already allocated"
+
+private def ModuleState.extend (state : ModuleState base) (range : NameRange)
+    (name : String) (parameters : List String) (type value : Term state.scope) :
+    Except String (ModuleState base) := do
+  let id := range.start + state.declarations.length
+  unless id < range.stop do
+    throw s!"reserved name range exhausted at declaration '{name}'"
+  state.extendAt id name parameters type value
 
 private def importedNames (env : CheckedModules) (imports : Array String) :
     Except String (NameTable env.scope) :=
@@ -226,22 +231,27 @@ private def checkReservation (env : CheckedModules) (name : String) (range : Nam
     throw s!"duplicate module '{name}'"
   if let some other := env.modules.find? (range.overlaps ·.range) then
     throw s!"reserved name ranges overlap for modules '{name}' and '{other.name}'"
+  if let some id := env.scope.find? (fun id => range.start ≤ id && id < range.stop) then
+    throw s!"reserved name range of module '{name}' overlaps existing declaration identifier {id}"
 
 private def ModuleState.finish (env : CheckedModules) (state : ModuleState env.scope)
     (name : String) (range : NameRange) (imports : Array String) : CheckedModules :=
   let checked := ⟨name, range, imports, state.declarations.reverse⟩
   ⟨state.scope, state.context, checked :: env.modules.map (·.sink state.outer)⟩
 
-private def runModuleCommand (state : ModuleState base) (mod : Module) (range : NameRange)
+private def runModuleCommand (state : ModuleState base) (moduleName : Option String)
     (params : ParamTelescope base inner) (fixed : TermTable base) (imports : NameTable base) (fuel : Nat)
-    (command : Command) : Except String (ModuleState base × CommandResult) := do
+    (command : Command)
+    (extend : String → List String → Term state.scope → Term state.scope → Except String (ModuleState base)) :
+    Except String (ModuleState base × CommandResult) := do
   let params := (params.rename state.scope (Name.sink state.outer) (fun rename term =>
     term.rename rename)).telescope
   let ctx := parameterContext state.context params
   let namedParams := parameterNames params
   let sinkKey (key : Name state.scope) := key.sink params.scopeSubset
   let localNames := state.declarations.flatMap fun decl =>
-    [(decl.name, sinkKey decl.key), (s!"{mod.name}.{decl.name}", sinkKey decl.key)]
+    (decl.name, sinkKey decl.key) ::
+      (moduleName.map fun name => (s!"{name}.{decl.name}", sinkKey decl.key)).toList
   let outer : base ⊆ _ := fun {_} mem => params.scopeSubset (state.outer mem)
   let imported := sinkNames imports outer
   let fixed := sinkTerms fixed outer
@@ -274,7 +284,7 @@ private def runModuleCommand (state : ModuleState base) (mod : Module) (range : 
         throw s!"'{name}' declares over ({String.intercalate ", " names}) but uses over ({String.intercalate ", " labels})"
     let (type, value) := abstractDefinition retained type value
     (checkDefinition state.context fuel type value).mapError toString
-    pure (← state.extend range name labels type value, .defined name)
+    pure (← extend name labels type value, .defined name)
   match command with
   | .define name type value => define name none type value
   | .defineOver name labels type value => define name (some labels) type value
@@ -295,11 +305,49 @@ def checkModule (env : CheckedModules) (range : NameRange) (mod : Module) (fuel 
   let mut state : ModuleState env.scope := ⟨env.scope, fun {_} mem => mem, env.context, []⟩
   let mut results := #[]
   for i in List.finRange mod.commands.size do
-    let (next, result) ← (runModuleCommand state mod range params fixed imports fuel mod.commands[i]).mapError
-      fun error => s!"module '{mod.name}', command {i.val + 1}: {error}"
+    let (next, result) ← (runModuleCommand state (some mod.name) params fixed imports fuel
+      mod.commands[i] (state.extend range)).mapError fun error =>
+      s!"module '{mod.name}', command {i.val + 1}: {error}"
     state := next
     results := results.push result
   pure (state.finish env mod.name range mod.imports, results)
+
+/-- An interactive context includes the build's checked modules and the session's own definitions.
+Only modules listed in the session's imports contribute names to its commands. -/
+structure ReplSession where
+  private mk ::
+  environment : CheckedModules
+  imports : Array String
+  declarations : List (CheckedDeclaration environment.scope)
+
+def ReplSession.start (env : CheckedModules) : ReplSession := ⟨env, #[], []⟩
+
+/-- Expose one module from an environment that extends the current session. -/
+def ReplSession.addImport (session : ReplSession) (environment : CheckedModules) (name : String) :
+    Except String ReplSession := do
+  unless (environment.find? name).isSome do
+    throw s!"unknown module '{name}'"
+  if outer : session.environment.scope ⊆ environment.scope then
+    let imports := if session.imports.contains name then session.imports else session.imports.push name
+    pure ⟨environment, imports, session.declarations.map (·.sink outer)⟩
+  else throw s!"importing '{name}' would discard declarations from the session"
+
+/-- Check a command in the current session. Allocate new definitions beyond all known module
+reservations, including the caller's reservation floor for cached modules. -/
+def ReplSession.step (session : ReplSession) (command : Command) (reservedEnd : Nat := 0)
+    (fuel : Nat := 1024) : Except String (ReplSession × CommandResult) := do
+  let env := session.environment
+  let imports ← importedNames env session.imports
+  let state : ModuleState env.scope :=
+    ⟨env.scope, fun {_} mem => mem, env.context, session.declarations⟩
+  let id := env.modules.foldl (fun next mod => max next mod.range.stop)
+    (max reservedEnd env.scope.nextId)
+  let (next, result) ← runModuleCommand state none .nil [] imports fuel command (state.extendAt id)
+  match result with
+  | .defined _ =>
+    let environment : CheckedModules := ⟨next.scope, next.context, env.modules.map (·.sink next.outer)⟩
+    pure (⟨environment, session.imports, next.declarations⟩, result)
+  | _ => pure (session, result)
 
 /-- Separate stored global identifiers from lexical binding levels, even at the same number. -/
 inductive StoredName where

@@ -156,3 +156,28 @@ lake exe mltt --cache .mltt-cache providers.mltt client.mltt
 The cache records each module's parsed source after telescope expansion, its checked artifact, and its command output. A subsequent build revalidates matching artifacts against their checked dependencies. Cached modules replay the stored output of `def`, `check`, and `compute` without running those source commands again. Whitespace and comments leave the parsed source unchanged.
 
 An edit rebuilds the affected module. Its clients can still reuse artifacts if their checked dependencies are unchanged up to α-equivalence. The cache retains identifier ranges as unrelated modules are added. A module that outgrows its reservation receives a new range. Missing, stale, or invalid entries fall back to source checking. The build writes replacement entries after the whole project checks successfully.
+
+### Explore checked modules interactively
+
+```sh
+lake exe mltt --repl client.mltt providers.mltt
+```
+
+After the build succeeds, enter one `import`, `def`, `check`, or `compute` command per line. An import exposes a module's declarations by their bare and qualified names. Import dependencies explicitly to use their names, too. Successful definitions are available until you end the session with EOF. A rejected instruction prints a diagnostic and the session continues.
+
+These commands import and query the `UnitChoice` module from the telescope example.
+
+```text
+import UnitChoice
+def result : 𝟙 := UnitChoice.chosen
+check result : 𝟙
+compute result
+```
+
+Add `--cache .mltt-cache` after `--repl` to use the artifact cache. If an earlier build has already populated the cache, start a session without source files to import its modules on demand.
+
+```sh
+lake exe mltt --repl --cache .mltt-cache
+```
+
+The REPL checks each requested artifact with its dependencies before exposing the module. Use `--repl --parallel` to check source modules in parallel before starting a session.

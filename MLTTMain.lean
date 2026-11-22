@@ -37,30 +37,72 @@ private def run (source input : String) (parallel : Bool := false) : IO UInt32 :
       IO.eprintln s!"{source}: {error}"
       return 1
 
+private def runRepl (environment : CheckedModules) (cache : Option System.FilePath) : IO UInt32 := do
+  let reservedEnd := (← cache.mapM cachedReservationEnd).getD 0
+  let stdin ← IO.getStdin
+  let stdout ← IO.getStdout
+  let prompt := (← stdin.isTty) && (← stdout.isTty)
+  let mut session := ReplSession.start environment
+  repeat
+    if prompt then stdout.putStr "mltt> "
+    stdout.flush
+    let line ← stdin.getLine
+    if line.isEmpty then
+      if prompt then stdout.putStrLn ""
+      return 0
+    match Parser.parseSessionLine line with
+    | .error error => IO.eprintln s!"repl: parse error at {error}"
+    | .ok none => pure ()
+    | .ok (some (.importModule name)) =>
+      match ← session.importModule name cache with
+      | .error error => IO.eprintln s!"repl: import '{name}': {error}"
+      | .ok next =>
+        session := next
+        stdout.putStrLn s!"✓ imported {name}"
+    | .ok (some (.command command)) =>
+      match session.step command reservedEnd with
+      | .error error => IO.eprintln s!"repl: {error}"
+      | .ok (next, result) =>
+        session := next
+        stdout.putStrLn (toString result)
+
 private def runProject (paths : List String) (cache : Option System.FilePath := none)
-    (parallel : Bool := false) : IO UInt32 := do
+    (parallel repl : Bool := false) : IO UInt32 := do
   let sources ← paths.toArray.mapM fun (path : String) => do
     pure (path, ← IO.FS.readFile path)
   let result ← match cache with
-    | some directory => pure ((← runCachedModuleProject directory sources).map (·.results))
+    | some directory => pure ((← runCachedModuleProject directory sources).map fun project =>
+        (project.environment, project.results))
     | none =>
-      let checked ← if parallel then runModuleProjectParallel sources else pure (runModuleProject sources)
-      pure (checked.map Prod.snd)
+      if parallel then runModuleProjectParallel sources else pure (runModuleProject sources)
   match result with
-  | .ok results =>
+  | .ok (environment, results) =>
     printModuleResults results
-    return 0
+    if repl then runRepl environment cache else return 0
   | .error error =>
     IO.eprintln error
     return 1
 
 private def usage : IO UInt32 := do
   IO.eprintln "usage: mltt [file ... | -] | mltt --parallel (file ... | -) | mltt --cache directory file ..."
+  IO.eprintln "       mltt --repl [--cache directory | --parallel] [file ...]"
   return 2
+
+private def runReplProject (paths : List String) (cache : Option System.FilePath := none)
+    (parallel : Bool := false) : IO UInt32 := do
+  if paths.any (fun path => path == "-" || path.startsWith "--") then usage
+  else if paths.isEmpty then runRepl CheckedModules.empty cache
+  else runProject paths cache parallel (repl := true)
 
 def main (args : List String) : IO UInt32 := do
   try
     match args with
+    | "--repl" :: "--cache" :: directory :: paths
+    | "--cache" :: directory :: "--repl" :: paths =>
+      runReplProject paths (some directory)
+    | "--repl" :: "--parallel" :: paths
+    | "--parallel" :: "--repl" :: paths => runReplProject paths (parallel := true)
+    | "--repl" :: paths => runReplProject paths
     | ["--parallel", "-"] => run "stdin" (← (← IO.getStdin).readToEnd) (parallel := true)
     | "--parallel" :: paths =>
       match paths with

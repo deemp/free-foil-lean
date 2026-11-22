@@ -106,9 +106,57 @@ private def cliTests : IO Unit := IO.FS.withTempDir fun directory => do
     verify s!"unexpected cached MLTT CLI output: {output.stdout}{output.stderr}"
       (output.exitCode == 0 && output.stdout.replace "\r\n" "\n" == expected && output.stderr.isEmpty)
 
+private def replCliTests : IO Unit := IO.FS.withTempDir fun directory => do
+  let executable := if System.Platform.isWindows then "mltt.exe" else "mltt"
+  let mltt := (← IO.appDir) / executable
+  let cache := directory / "cache"
+  let files := sources "𝟙" "x"
+  for (name, contents) in files do
+    IO.FS.writeFile (directory / name) contents
+  let paths := files.map fun (name, _) => (directory / name).toString
+  let run (args : Array String) (input : String) :=
+    IO.Process.output { cmd := mltt.toString, args } (some input)
+  let expect (output : IO.Process.Output) (lines : List String) (diagnostics : List String) := do
+    verify s!"unexpected MLTT REPL output: {output.stdout}{output.stderr}"
+      (output.exitCode == 0 && output.stdout.replace "\r\n" "\n" == String.intercalate "\n" (lines ++ [""]) &&
+        diagnostics.all (fun message => output.stderr.contains message))
+    verify s!"unexpected number of REPL diagnostics: {output.stderr}"
+      ((output.stderr.splitOn "\n").length == diagnostics.length + 1)
+  let buildLines := ["module Provider", "  ✓ defined carrier", "  ✓ defined ident", "  ↦ 𝟙",
+    "module Client", "  ✓ defined alias", "  ↦ 𝟙"]
+  let script := "compute Client.alias\nimport Client;\ncheck alias : 𝕌\ncompute alias\n"
+  let sourceSession ← run (#["--repl"] ++ paths) script
+  expect sourceSession (buildLines ++ ["✓ imported Client", "✓ alias : 𝕌", "↦ 𝟙"])
+    ["unbound name 'Client.alias'"]
+
+  let _ ← build cache files
+  let warmSession ← run (#["--repl", "--cache", cache.toString] ++ paths) script
+  expect warmSession (buildLines ++ ["✓ imported Client", "✓ alias : 𝕌", "↦ 𝟙"])
+    ["unbound name 'Client.alias'"]
+
+  let cachedSession ← run #["--repl", "--cache", cache.toString] (String.intercalate "\n" [
+    "-- starting from a cache with no source arguments", "def saved : 𝟙 := tt",
+    "import Client;", "check Client.alias : 𝕌", "compute Provider.carrier",
+    "import Missing", "def local : 𝟙 := 𝕌", "def local : 𝟙 := saved", "check local : 𝟙",
+    "import Provider", "compute ident local"])
+  expect cachedSession ["✓ defined saved", "✓ imported Client", "✓ alias : 𝕌", "✓ defined local",
+      "✓ local : 𝟙", "✓ imported Provider", "↦ tt"]
+    ["unbound name 'Provider.carrier'", "missing or invalid cached module 'Missing'", "expected type 𝟙, got 𝕌"]
+
+  -- Rebuild one dependency while leaving the dependent's old checksum in its cache entry.
+  let unrelated := ("unrelated.mltt", "module Unrelated\ndef other : 𝟙 := tt")
+  let _ ← build cache #[("provider.mltt", provider "𝕌" "x"), unrelated]
+  let staleSession ← run #["--cache", cache.toString, "--repl"] (String.intercalate "\n" [
+    "def saved : 𝟙 := tt", "import Client", "compute Client.alias", "import Unrelated",
+    "compute other", "check saved : 𝟙", "import Provider", "compute carrier"])
+  expect staleSession ["✓ defined saved", "✓ imported Unrelated", "↦ tt", "✓ saved : 𝟙",
+      "✓ imported Provider", "↦ 𝕌"]
+    ["dependency manifest does not match the checked imports of 'Client'", "unbound name 'Client.alias'"]
+
 def run : IO Unit := do
   cacheTests
   expandedHeaderCacheTest
   cliTests
+  replCliTests
 
 end FreeFoil.Tests.MLTTCache
