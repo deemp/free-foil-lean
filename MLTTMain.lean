@@ -2,6 +2,12 @@ import FreeFoil.Examples.MLTT.Module
 
 open FreeFoil.Examples.MLTT
 
+private def printModuleResults (results : ModuleResults) : IO Unit := do
+  for (name, commands) in results do
+    IO.println s!"module {name}"
+    for command in commands do
+      IO.println s!"  {command}"
+
 private def run (source input : String) : IO UInt32 := do
   let parsed ← match Parser.parseInput input with
     | .ok input => pure input
@@ -24,23 +30,33 @@ private def run (source input : String) : IO UInt32 := do
   | .modules modules =>
     match runModules modules with
     | .ok results =>
-      for (name, commands) in results do
-        IO.println s!"module {name}"
-        for command in commands do
-          IO.println s!"  {command}"
+      printModuleResults results
       return 0
     | .error error =>
       IO.eprintln s!"{source}: {error}"
       return 1
+
+private def runProject (paths : List String) : IO UInt32 := do
+  let sources ← paths.toArray.mapM fun (path : String) => do
+    pure (path, ← IO.FS.readFile path)
+  match runModuleProject sources with
+  | .ok (_, results) =>
+    printModuleResults results
+    return 0
+  | .error error =>
+    IO.eprintln error
+    return 1
 
 def main (args : List String) : IO UInt32 := do
   try
     match args with
     | [] | ["-"] => run "stdin" (← (← IO.getStdin).readToEnd)
     | [path] => run path (← IO.FS.readFile path)
-    | _ =>
-      IO.eprintln "usage: mltt [file|-]"
-      return 2
+    | paths =>
+      if paths.contains "-" then
+        IO.eprintln "usage: mltt [file ... | -]"
+        return 2
+      runProject paths
   catch error =>
     IO.eprintln s!"mltt: {error}"
     return 1

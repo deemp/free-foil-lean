@@ -84,6 +84,14 @@ Lean clients can call `checkModule` with a half-open `NameRange`. The function a
 
 The parameter example is the [unchanged upstream fixture](https://github.com/fizruk/free-foil/blob/fdfbeef/haskell/mltt/examples/parameters.mltt).
 
+### Build a project from several files
+
+```sh
+lake exe mltt providers.mltt client.mltt
+```
+
+Each file can contribute modules and named telescopes to the project. Imports can refer to modules in any of the supplied files. The build checks dependencies before their clients and assigns identifier ranges by module name, so reordering the paths preserves the build output and identifiers.
+
 ### Share module parameters with named telescopes
 
 Declare a telescope alongside the modules and use `include` before the local parameters in a module or telescope header.
@@ -99,7 +107,7 @@ module Pairs include Pointed (other : A)
 def chosen over (A, other) : A := other
 ```
 
-The fields of each include appear in their declared order, followed by the local parameters. Each including module checks the expanded header in its own scope. Definitions discharge the parameters they use and the dependencies of those parameters, as with an explicit header. Telescope names can be used before their declaration in the same source. Missing telescopes, include cycles, and repeated parameter names are errors.
+The fields of each include appear in their declared order, followed by the local parameters. Each including module checks the expanded header in its own scope. Definitions discharge the parameters they use and the dependencies of those parameters, as with an explicit header. Telescope names can be used before their declaration or from another file in the project. Missing telescopes, include cycles, and repeated parameter names are errors.
 
 ## Save and load checked MLTT modules
 

@@ -199,6 +199,71 @@ private def namedTelescopeTests : IO Unit := do
   expectError "duplicate parameter 'A' in module 'Client'"
     (Parser.parseModules "telescope T (A : 𝕌) module Client include T (A : 𝕌)")
 
+private def moduleProjectTests : IO Unit := do
+  let files := #[
+    ("provider.mltt", "module ZProvider def carrier : 𝕌 := 𝟙"),
+    ("types.mltt", "telescope ItemType (x : carrier)"),
+    ("client.mltt", "module AClient include ItemType import ZProvider\n\
+      def value : carrier := x"),
+    ("main.mltt", "module Main import AClient compute AClient.value tt")]
+  let (first, firstResults) ← expectOk (runModuleProject files)
+  let (second, secondResults) ← expectOk (runModuleProject files.reverse)
+  verify "MLTT project output depended on input file ordering" (firstResults == secondResults)
+  verify "MLTT project did not check imports before their clients"
+    (firstResults == #[("ZProvider", #[.defined "carrier"]), ("AClient", #[.defined "value"]),
+      ("Main", #[.computed "tt"])])
+  let _ ← expectOk (linkModules first second)
+  let some client := first.find? "AClient"
+    | throw (IO.userError "MLTT project lost its client module")
+  let some provider := first.find? "ZProvider"
+    | throw (IO.userError "MLTT project lost its provider module")
+  verify "MLTT project did not allocate ranges and IDs by module name"
+    (client.range == ⟨0, 1⟩ && provider.range == ⟨2, 3⟩ &&
+      client.declarations.map (·.key.id) == [0] && provider.declarations.map (·.key.id) == [2])
+
+private def moduleProjectCLITests : IO Unit := IO.FS.withTempDir fun dir => do
+  let executable := if System.Platform.isWindows then "mltt.exe" else "mltt"
+  let mltt := (← IO.appDir) / executable
+  let provider := dir / "provider.mltt"
+  let client := dir / "client.mltt"
+  let providerSource := "module Provider\ndef base : 𝟙 := tt"
+  let clientSource := "module Client\nimport Provider\ncompute Provider.base"
+  IO.FS.writeFile provider providerSource
+  IO.FS.writeFile client clientSource
+  let run (args : Array String) (stdin : Option String := none) :=
+    IO.Process.output { cmd := mltt.toString, args } stdin
+  let expectOutput (args : Array String) (result : String) (stdin : Option String := none) := do
+    let output ← run args stdin
+    verify s!"unexpected MLTT CLI output for {repr args}: {output.stdout}{output.stderr}"
+      (output.exitCode == 0 && output.stdout.replace "\r\n" "\n" == result && output.stderr.isEmpty)
+  let expectFailure (args : Array String) (fragments : Array String) := do
+    let output ← run args
+    verify s!"unexpected MLTT CLI diagnostic for {repr args}: {output.stderr}"
+      (output.exitCode == 1 && fragments.all (fun fragment => output.stderr.contains fragment))
+  let projectOutput := "module Provider\n  ✓ defined base\nmodule Client\n  ↦ tt\n"
+  expectOutput #[client.toString, provider.toString] projectOutput
+  expectOutput #[provider.toString, client.toString] projectOutput
+  let combined := dir / "combined.mltt"
+  IO.FS.writeFile combined (clientSource ++ "\n" ++ providerSource)
+  expectOutput #[combined.toString] projectOutput
+  let standalone := dir / "standalone.mltt"
+  let standaloneSource := "module Standalone\ndef base : 𝟙 := tt\ncompute base"
+  IO.FS.writeFile standalone standaloneSource
+  let standaloneOutput := "module Standalone\n  ✓ defined base\n  ↦ tt\n"
+  expectOutput #[standalone.toString] standaloneOutput
+  expectOutput #[] standaloneOutput (some standaloneSource)
+  expectOutput #["-"] standaloneOutput (some standaloneSource)
+  let duplicate := dir / "duplicate.mltt"
+  IO.FS.writeFile duplicate "module Provider"
+  expectFailure #[provider.toString, duplicate.toString]
+    #["duplicate module 'Provider'", provider.toString, duplicate.toString]
+  expectFailure #[client.toString, standalone.toString]
+    #["module 'Client'", client.toString, "is missing dependency 'Provider'"]
+  let cycle := dir / "cycle.mltt"
+  IO.FS.writeFile cycle "module Provider\nimport Client"
+  expectFailure #[client.toString, cycle.toString]
+    #["cyclic module imports", "module 'Client'", client.toString, "module 'Provider'", cycle.toString]
+
 private def moduleLinkTests : IO Unit := do
   let common ← singleModule "module Common def base : 𝟙 := tt def U : 𝕌 := 𝟙"
   let left ← singleModule "module Left (A : 𝕌) (x : A) (unused : 𝟙) import Common\n\
@@ -364,6 +429,8 @@ def run : IO Unit := do
   programTests
   parameterTests
   namedTelescopeTests
+  moduleProjectTests
+  moduleProjectCLITests
   moduleLinkTests
   importResolutionTests
   artifactTests

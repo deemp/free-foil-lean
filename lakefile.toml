@@ -18,3 +18,4 @@ root = "MLTTMain"
 [[lean_exe]]
 name = "freeFoilTests"
 root = "Test"
+needs = ["mltt"]

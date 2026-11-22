@@ -23,6 +23,11 @@ structure Module where
   imports : Array String
   commands : Array Command
 
+/-- A parsed module and, when available, the path of its source file. -/
+structure SourceModule where
+  mod : Module
+  source : Option String := none
+
 inductive Input where
   | standalone (program : Program)
   | modules (modules : Array Module)
@@ -228,16 +233,24 @@ private def distinctParameters (owner : String) (parameters : Array Parameter) :
       throw s!"duplicate parameter '{param.name}' in {owner}"
     seen := param.name :: seen
 
+private def atSource (source : Option String) (error : String) : String :=
+  match source with
+  | some path => s!"{path}: {error}"
+  | none => error
+
 /-- Memoize expanded raw headers. Their field types are checked in each including module. -/
-private partial def expandTelescope (declared : List (String × ParameterHeader))
+private partial def expandTelescope (declared : List (String × (Option String × ParameterHeader)))
     (path : List String) (expanded : List (String × Array Parameter)) (name : String) :
     Except String (List (String × Array Parameter) × Array Parameter) := do
   if path.contains name then
-    throw s!"cyclic telescope includes: {String.intercalate " -> " (name :: path).reverse}"
+    let source := (declared.lookup name).bind Prod.fst
+    throw (atSource source s!"cyclic telescope includes: {String.intercalate " -> " (name :: path).reverse}")
   if let some params := expanded.lookup name then
     return (expanded, params)
-  let some header := declared.lookup name
-    | throw s!"missing telescope '{name}' in include chain {String.intercalate " -> " path.reverse}"
+  let some (source, header) := declared.lookup name
+    | let source := path.head?.bind fun parent => (declared.lookup parent).bind Prod.fst
+      throw (atSource source
+        s!"missing telescope '{name}' in include chain {String.intercalate " -> " path.reverse}")
   let mut expanded := expanded
   let mut params := #[]
   for included in header.includes do
@@ -245,36 +258,53 @@ private partial def expandTelescope (declared : List (String × ParameterHeader)
     expanded := next
     params := params ++ fields
   params := params ++ header.parameters
-  distinctParameters s!"telescope '{name}'" params
+  (distinctParameters s!"telescope '{name}'" params).mapError (atSource source)
   pure ((name, params) :: expanded, params)
 
-private def expandSource (units : Array SourceUnit) : Except String (Array Module) := do
-  let mut declared : List (String × ParameterHeader) := []
-  for unit in units do
+private def expandSource (units : Array (Option String × SourceUnit)) :
+    Except String (Array SourceModule) := do
+  let mut declared : List (String × (Option String × ParameterHeader)) := []
+  for (source, unit) in units do
     if let .telescope header := unit then
-      if (declared.lookup header.name).isSome then
-        throw s!"duplicate telescope '{header.name}'"
-      declared := (header.name, header) :: declared
+      if let some (previous, _) := declared.lookup header.name then
+        let error := s!"duplicate telescope '{header.name}'"
+        let detail := previous.map fun path => s!", also declared in {path}"
+        throw (atSource source (error ++ detail.getD ""))
+      declared := (header.name, (source, header)) :: declared
   let mut expanded : List (String × Array Parameter) := []
   for (name, _) in declared.reverse do
     let (next, _) ← expandTelescope declared [] expanded name
     expanded := next
   let mut modules := #[]
-  for unit in units do
+  for (source, unit) in units do
     if let .module header imports commands := unit then
       let mut params := #[]
       for name in header.includes do
         let some fields := expanded.lookup name
-          | throw s!"missing telescope '{name}' in module '{header.name}'"
+          | throw (atSource source s!"missing telescope '{name}' in module '{header.name}'")
         params := params ++ fields
       params := params ++ header.parameters
       unless header.includes.isEmpty do
-        distinctParameters s!"module '{header.name}'" params
-      modules := modules.push ⟨header.name, params, imports, commands⟩
+        (distinctParameters s!"module '{header.name}'" params).mapError (atSource source)
+      modules := modules.push ⟨⟨header.name, params, imports, commands⟩, source⟩
   pure modules
 
+private def parseSourceUnits (source : String) : Except String (Array SourceUnit) :=
+  (trivia *> many1 sourceUnit <* eof).run source
+
+private def expandAnonymousSource (units : Array SourceUnit) : Except String (Array Module) :=
+  (expandSource (units.map (none, ·))).map (·.map SourceModule.mod)
+
 def parseModules (source : String) : Except String (Array Module) := do
-  expandSource (← (trivia *> many1 sourceUnit <* eof).run source)
+  expandAnonymousSource (← parseSourceUnits source)
+
+/-- Parse a project before expanding the telescope headers shared across its files. -/
+def parseModuleSources (sources : Array (String × String)) : Except String (Array SourceModule) := do
+  let mut units := #[]
+  for (path, source) in sources do
+    let parsed ← (parseSourceUnits source).mapError fun error => s!"{path}: parse error at {error}"
+    units := units ++ parsed.map (some path, ·)
+  expandSource units
 
 /-- Parse a standalone program or expand the headers of a module source. -/
 def parseInput (source : String) : Except String Input := do
@@ -285,7 +315,7 @@ def parseInput (source : String) : Except String Input := do
     if let #[.module header imports commands] := units then
       if header.includes.isEmpty && header.parameters.isEmpty && imports.isEmpty then
         return .standalone ⟨some header.name, commands⟩
-    pure (.modules (← expandSource units))
+    pure (.modules (← expandAnonymousSource units))
 where
   parser : Parser (Sum (Array SourceUnit) Program) := do
     trivia

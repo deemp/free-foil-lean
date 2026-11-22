@@ -332,32 +332,89 @@ def checkStoredModule (env : CheckedModules) (name : String) (range : NameRange)
       fun error => s!"module '{name}', declaration '{decl.name}': {error}"
   pure (state.finish env name range imports)
 
-/-- Check a file's modules in dependency order, reserving a range per module in source order. -/
-def runModules (modules : Array Module) (fuel : Nat := 1024) :
-    Except String (Array (String × Array CommandResult)) := do
+/-- A module with the identifier range it will use during checking. -/
+structure PlannedModule where
+  input : SourceModule
+  range : NameRange
+
+private def SourceModule.location (input : SourceModule) : String :=
+  let name := s!"module '{input.mod.name}'"
+  match input.source with
+  | some path => s!"{name} ({path})"
+  | none => name
+
+private def importCycle (pending : Array PlannedModule) : String := Id.run do
+  let base := "cyclic module imports"
+  let some first := pending[0]? | return base
+  let mut current := first
+  let mut path := [first.input]
+  for _ in pending do
+    let some next := current.input.mod.imports.findSome? (fun dependency =>
+      pending.find? (·.input.mod.name == dependency)) | break
+    let name := next.input.mod.name
+    if path.any (·.mod.name == name) then
+      let cycle := path.reverse.dropWhile (·.mod.name != name) ++ [next.input]
+      return s!"{base}: {String.intercalate " -> " (cycle.map SourceModule.location)}"
+    current := next
+    path := next.input :: path
+  return base
+
+private def planModules (inputs : Array SourceModule) : Except String (Array PlannedModule) := do
   let mut start := 0
   let mut pending := #[]
-  let names := modules.toList.map Module.name
-  unless names.Nodup do
-    throw "duplicate module name"
-  for mod in modules do
-    for dependency in mod.imports do
-      unless names.contains dependency do
-        throw s!"module '{mod.name}' is missing dependency '{dependency}'"
-    let stop := start + max 1 mod.commands.size
-    pending := pending.push ((⟨start, stop⟩ : NameRange), mod)
+  let mut declared : List (String × SourceModule) := []
+  for input in inputs do
+    let name := input.mod.name
+    if let some previous := declared.lookup name then
+      throw s!"duplicate {input.location}, also declared as {previous.location}"
+    declared := (name, input) :: declared
+    let stop := start + max 1 input.mod.commands.size
+    pending := pending.push ({ input, range := ⟨start, stop⟩ } : PlannedModule)
     start := stop
+  for input in inputs do
+    for dependency in input.mod.imports do
+      unless (declared.lookup dependency).isSome do
+        throw s!"{input.location} is missing dependency '{dependency}'"
+  let mut ordered : Array PlannedModule := #[]
+  let mut ready : List String := []
+  for _ in inputs do
+    let some next := pending.find? (fun entry => entry.input.mod.imports.all ready.contains)
+      | throw (importCycle pending)
+    let name := next.input.mod.name
+    ordered := ordered.push next
+    ready := name :: ready
+    pending := pending.filter (·.input.mod.name != name)
+  pure ordered
+
+/-- Reserve ranges by module name, then plan the build in dependency order. -/
+def planModuleProject (modules : Array SourceModule) : Except String (Array PlannedModule) :=
+  planModules (modules.qsort (fun left right => left.mod.name < right.mod.name))
+
+abbrev ModuleResults := Array (String × Array CommandResult)
+
+/-- Check a build plan and keep both the resulting environment and command output. -/
+def checkModulePlan (plan : Array PlannedModule) (fuel : Nat := 1024) :
+    Except String (CheckedModules × ModuleResults) := do
   let mut env := CheckedModules.empty
   let mut results := #[]
-  for _ in [:modules.size] do
-    if pending.isEmpty then break
-    let some (range, mod) := pending.find? (fun (_, mod) =>
-      mod.imports.all fun name => (env.find? name).isSome)
-      | throw "cyclic module imports"
-    let (next, output) ← checkModule env range mod fuel
+  for entry in plan do
+    let (next, output) ← (checkModule env entry.range entry.input.mod fuel).mapError fun error =>
+      match entry.input.source with
+      | some path => s!"{path}: {error}"
+      | none => error
     env := next
-    results := results.push (mod.name, output)
-    pending := pending.filter (·.2.name != mod.name)
-  pure results
+    results := results.push (entry.input.mod.name, output)
+  pure (env, results)
+
+/-- Check a source project's modules with reservations independent of input file order. -/
+def runModuleProject (sources : Array (String × String)) (fuel : Nat := 1024) :
+    Except String (CheckedModules × ModuleResults) := do
+  let modules ← Parser.parseModuleSources sources
+  checkModulePlan (← planModuleProject modules) fuel
+
+/-- Check a file's modules in dependency order, reserving a range per module in source order. -/
+def runModules (modules : Array Module) (fuel : Nat := 1024) : Except String ModuleResults := do
+  let plan ← planModules (modules.map fun mod => { mod })
+  return (← checkModulePlan plan fuel).2
 
 end FreeFoil.Examples.MLTT
