@@ -98,6 +98,14 @@ lake exe mltt providers.mltt client.mltt
 
 Each file can contribute modules and named telescopes to the project. Imports can refer to modules in any of the supplied files. The build checks dependencies before their clients and assigns identifier ranges by module name, so reordering the paths preserves the build output and identifiers.
 
+Pass `--parallel` to check independent modules concurrently.
+
+```sh
+lake exe mltt --parallel providers.mltt client.mltt
+```
+
+Each check starts after its imports finish successfully. The build retains the sequential order for reported results and uses the same declaration identifiers. A failing module is reported with its source location, and its clients are skipped. Use `--parallel` for a source build and `--cache` for a build that reuses checked artifacts.
+
 ### Share module parameters with named telescopes
 
 Declare a telescope alongside the modules and use `include` before the local parameters in a module or telescope header.

@@ -265,6 +265,33 @@ private def moduleProjectTests : IO Unit := do
     (client.range == ⟨0, 1⟩ && provider.range == ⟨2, 3⟩ &&
       client.declarations.map (·.key.id) == [0] && provider.declarations.map (·.key.id) == [2])
 
+private def parallelModuleProjectTests : IO Unit := do
+  let right := "module Right import Base def r : T := value def second : T := r"
+  let files := #[
+    ("client.mltt", "module Client import Left import Right compute l compute second"),
+    ("right.mltt", right ++ " check (λ x ⇒ x) : Π (x : T) → T"),
+    ("base.mltt", "module Base def T : 𝕌 := 𝟙 def value : T := tt"),
+    ("left.mltt", "module Left import Base def l : T := value compute (λ x ⇒ x : T → T)")]
+  let (sequential, sequentialOutput) ← expectOk (runModuleProject files)
+  let (parallel, parallelOutput) ← expectOk (← runModuleProjectParallel files.reverse)
+  verify "parallel MLTT changed the serial command results or the diamond's output"
+    (parallelOutput == sequentialOutput &&
+      parallelOutput.back? == some ("Client", #[.computed "tt", .computed "tt"]))
+  verify "parallel MLTT changed the order of assembled declaration IDs or modules"
+    (parallel.scope == sequential.scope && parallel.modules.map (·.name) == sequential.modules.map (·.name))
+  for name in ["Base", "Left", "Right", "Client"] do
+    let original ← expectOk (makeArtifact sequential name)
+    let concurrent ← expectOk (makeArtifact parallel name)
+    verify s!"parallel MLTT changed the checked declaration IDs, types, or values of '{name}'"
+      (encodeArtifact original == encodeArtifact concurrent)
+  let bad := files.set! 1 ("right.mltt", right ++ " check tt : Π (x : T) → T")
+  let .error serialError := runModuleProject bad
+    | throw (IO.userError "expected the right branch of the diamond to fail")
+  expectError "right.mltt: module 'Right', command 3" (.error serialError : Except String Unit)
+  let .error parallelError ← runModuleProjectParallel bad.reverse
+    | throw (IO.userError "parallel MLTT published a project with a failed import")
+  verify "parallel MLTT changed the diagnostic of the failing branch" (serialError == parallelError)
+
 private def moduleProjectCLITests : IO Unit := IO.FS.withTempDir fun dir => do
   let executable := if System.Platform.isWindows then "mltt.exe" else "mltt"
   let mltt := (← IO.appDir) / executable
@@ -287,9 +314,16 @@ private def moduleProjectCLITests : IO Unit := IO.FS.withTempDir fun dir => do
   let projectOutput := "module Provider\n  ✓ defined base\nmodule Client\n  ↦ tt\n"
   expectOutput #[client.toString, provider.toString] projectOutput
   expectOutput #[provider.toString, client.toString] projectOutput
+  expectOutput #["--parallel", client.toString, provider.toString] projectOutput
   let combined := dir / "combined.mltt"
   IO.FS.writeFile combined (clientSource ++ "\n" ++ providerSource)
   expectOutput #[combined.toString] projectOutput
+  expectOutput #["--parallel", combined.toString] projectOutput
+  expectOutput #["--parallel", "-"] projectOutput (some (clientSource ++ "\n" ++ providerSource))
+  let independent := dir / "independent.mltt"
+  IO.FS.writeFile independent "module Z def z : 𝟙 := tt module A compute (λ x ⇒ x : 𝟙 → 𝟙)"
+  let serial ← run #[independent.toString]
+  expectOutput #["--parallel", independent.toString] (serial.stdout.replace "\r\n" "\n")
   let standalone := dir / "standalone.mltt"
   let standaloneSource := "module Standalone\ndef base : 𝟙 := tt\ncompute base"
   IO.FS.writeFile standalone standaloneSource
@@ -475,6 +509,7 @@ def run : IO Unit := do
   namedTelescopeTests
   telescopeRefinementTests
   moduleProjectTests
+  parallelModuleProjectTests
   moduleProjectCLITests
   moduleLinkTests
   importResolutionTests

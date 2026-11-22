@@ -424,16 +424,20 @@ def planModuleProject (modules : Array SourceModule) : Except String (Array Plan
 
 abbrev ModuleResults := Array (String × Array CommandResult)
 
+private def checkPlannedModule (env : CheckedModules) (entry : PlannedModule) (fuel : Nat) :
+    Except String (CheckedModules × Array CommandResult) :=
+  (checkModule env entry.range entry.input.mod fuel).mapError fun error =>
+    match entry.input.source with
+    | some path => s!"{path}: {error}"
+    | none => error
+
 /-- Check a build plan and keep both the resulting environment and command output. -/
 def checkModulePlan (plan : Array PlannedModule) (fuel : Nat := 1024) :
     Except String (CheckedModules × ModuleResults) := do
   let mut env := CheckedModules.empty
   let mut results := #[]
   for entry in plan do
-    let (next, output) ← (checkModule env entry.range entry.input.mod fuel).mapError fun error =>
-      match entry.input.source with
-      | some path => s!"{path}: {error}"
-      | none => error
+    let (next, output) ← checkPlannedModule env entry fuel
     env := next
     results := results.push (entry.input.mod.name, output)
   pure (env, results)
@@ -444,9 +448,84 @@ def runModuleProject (sources : Array (String × String)) (fuel : Nat := 1024) :
   let modules ← Parser.parseModuleSources sources
   checkModulePlan (← planModuleProject modules) fuel
 
+-- Match the serial build's fresh names in results and type errors. Earlier
+-- unrelated declarations contribute only unnamed slots, which cannot resolve in source.
+private def withEarlierIds (env : CheckedModules) (earlier : Scope) : CheckedModules :=
+  let slots : Context earlier := ⟨fun _ => Term.univ, fun _ => none⟩
+  ⟨_, env.context.union slots, env.modules.map (·.sink (leftInUnion env.scope earlier))⟩
+
+-- Publish only real bindings. Reinstall this module's checked declarations in
+-- allocation order, narrowing their types and values to the available scope.
+private def installCheckedModule (env checked : CheckedModules) (entry : PlannedModule) :
+    Except String CheckedModules := do
+  let name := entry.input.mod.name
+  let some mod := checked.find? name | throw s!"missing checked module '{name}'"
+  let mut state : ModuleState env.scope := ⟨env.scope, fun {_} mem => mem, env.context, []⟩
+  for decl in mod.declarations do
+    let type := (checked.context.typeOf decl.key).restrict state.scope
+    let value := (checked.context.definitions decl.key).bind (·.restrict state.scope)
+    let (some type, some value) := (type, value)
+      | throw s!"{entry.input.location}: declaration '{decl.name}' escapes the dependency scope"
+    state ← state.extend entry.range decl.name decl.parameters type value
+  pure (state.finish env name entry.range mod.imports)
+
+private abbrev ModuleCheck := Except String (CheckedModules × Array CommandResult)
+
+private def checkFromImports (entry : PlannedModule) (earlier : Scope) (imports : List ModuleCheck)
+    (fuel : Nat) : ModuleCheck := do
+  let env ← match imports with
+    | [] => pure CheckedModules.empty
+    | first :: rest => rest.foldlM (fun env result => do linkModules env (← result).1) (← first).1
+  if earlier.all env.scope.contains then
+    checkPlannedModule env entry fuel
+  else
+    let (checked, output) ← checkPlannedModule (withEarlierIds env earlier) entry fuel
+    pure (← installCheckedModule env checked entry, output)
+
+private def checkModulePlanParallel (plan : Array PlannedModule) (fuel : Nat) :
+    BaseIO (Except String (CheckedModules × ModuleResults)) := do
+  let mut byName : Std.HashMap String (Task ModuleCheck) := {}
+  let mut jobs : Array (PlannedModule × Task ModuleCheck) := #[]
+  let mut earlier : Scope := []
+  for entry in plan do
+    let name := entry.input.mod.name
+    let some imports := entry.input.mod.imports.toList.mapM (byName[·]?)
+      | return .error s!"{entry.input.location}: dependency is missing from the build plan"
+    let job ← BaseIO.mapTasks (fun results => pure (checkFromImports entry earlier results fuel)) imports
+    byName := byName.insert name job
+    jobs := jobs.push (entry, job)
+    let size := entry.input.mod.commands.countP fun
+      | .define .. | .defineOver .. => true
+      | _ => false
+    earlier := (List.range size).foldl (fun ids offset => (entry.range.start + offset) :: ids) earlier
+  let completed ← jobs.mapM fun (entry, job) => do pure (entry, ← IO.wait job)
+  return do
+    let mut env := CheckedModules.empty
+    let mut results := #[]
+    for (entry, result) in completed do
+      let (checked, output) ← result
+      env ← installCheckedModule env checked entry
+      results := results.push (entry.input.mod.name, output)
+    pure (env, results)
+
+/-- Check each module of a project as soon as its imports are checked. The output
+and reported failure follow the same plan order as `runModuleProject`. -/
+def runModuleProjectParallel (sources : Array (String × String)) (fuel : Nat := 1024) :
+    BaseIO (Except String (CheckedModules × ModuleResults)) := do
+  match Parser.parseModuleSources sources >>= planModuleProject with
+  | .ok plan => checkModulePlanParallel plan fuel
+  | .error error => return .error error
+
 /-- Check a file's modules in dependency order, reserving a range per module in source order. -/
 def runModules (modules : Array Module) (fuel : Nat := 1024) : Except String ModuleResults := do
   let plan ← planModules (modules.map fun mod => { mod })
   return (← checkModulePlan plan fuel).2
+
+/-- Check a file's modules concurrently while keeping its source-order reservations and results. -/
+def runModulesParallel (modules : Array Module) (fuel : Nat := 1024) :
+    BaseIO (Except String ModuleResults) := do
+  match planModules (modules.map fun mod => { mod }) with
+  | .ok plan => return (← checkModulePlanParallel plan fuel).map Prod.snd
+  | .error error => return .error error
 
 end FreeFoil.Examples.MLTT
