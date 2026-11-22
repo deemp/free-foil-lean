@@ -49,17 +49,45 @@ private def compareEta (rules : Rules sig Context) (fuel : Nat) (compare : Compa
     let right ← force rules fuel inner observed
     compare inner true left right
 
+private inductive ComparisonMode where
+  | rigid
+  | folded
+  | unfolded
+  deriving BEq
+
 private def compareValues [DecidableEq sig.Op] [DecidableEq sig.Pattern]
     (rules : Rules sig Context) (fuel : Nat) (ctx : Context scope) (refine : Bool)
+    (mode : ComparisonMode)
     (left right : Value sig scope) : Result Bool :=
   match fuel with
   | 0 => .error .outOfFuel
   | fuel + 1 => do
     let evaluator : Evaluator sig scope := ⟨force rules fuel ctx⟩
-    let left ← if refine then rules.refine evaluator ctx left else pure left
-    let right ← if refine then rules.refine evaluator ctx right else pure right
-    let compare : Compare sig Context := fun ctx => compareValues rules fuel ctx
+    let left ← if refine then rules.refineHead evaluator ctx left else pure left
+    let right ← if refine then rules.refineHead evaluator ctx right else pure right
+    let compare : Compare sig Context := fun ctx refine => compareValues rules fuel ctx refine mode
     match left, right with
+    | .glued x leftFolded leftBody, .glued y rightFolded rightBody => do
+      if mode == .folded then
+        if x != y then return false
+        return ← compare ctx refine leftFolded rightFolded
+      let tryFolded := mode == .rigid && x == y
+      if tryFolded then
+        match compareValues rules fuel ctx refine .folded leftFolded rightFolded with
+        | .ok true => return true
+        | _ => pure ()
+      let next := if tryFolded then .unfolded else mode
+      let left ← evaluator.force leftBody
+      let right ← evaluator.force rightBody
+      compareValues rules fuel ctx refine next left right
+    | .glued _ _ body, right => do
+      if mode == .folded then return false
+      let left ← evaluator.force body
+      compare ctx refine left right
+    | left, .glued _ _ body => do
+      if mode == .folded then return false
+      let right ← evaluator.force body
+      compare ctx refine left right
     | .var x, .var y => pure (x == y)
     | .node op leftTerms leftChildren, .node op' rightTerms rightChildren =>
       if same : op' = op then
@@ -76,12 +104,13 @@ where
       ctx right left
 
 /-- Compare semantic values directly. Matching heads compare their children on
-demand, opening corresponding binders with the same fresh names. A language can
-opt introductions into η comparison through its rules. -/
+demand, opening corresponding binders with the same fresh names. Two uses of a
+definition try their folded forms before comparing unfolded bodies. A language
+can opt introductions into η comparison through its rules. -/
 def conv [DecidableEq sig.Op] [DecidableEq sig.Pattern]
     (rules : Rules sig Context) (fuel : Nat) (ctx : Context scope)
     (left right : Value sig scope) : Result Bool :=
-  compareValues rules fuel ctx true left right
+  compareValues rules fuel ctx true .rigid left right
 
 /-- Evaluate both terms under their own environments and compare in their common
 target scope. The budget bounds recursive evaluation and comparison depth. -/
@@ -93,10 +122,10 @@ def convertibleUnder [DecidableEq sig.Op] [DecidableEq sig.Pattern]
   let right ← evalUnder rules fuel ctx rightEnv right
   conv rules fuel ctx left right
 
-/-- Compare terms in a common context, treating their free names as neutrals. -/
+/-- Compare terms in a common context, resolving their free names through it. -/
 def convertible [DecidableEq sig.Op] [DecidableEq sig.Pattern]
     (rules : Rules sig Context) (fuel : Nat) (ctx : Context scope)
     (left right : AST sig scope) : Result Bool :=
-  convertibleUnder rules fuel ctx Thunk.var Thunk.var left right
+  convertibleUnder rules fuel ctx Thunk.free Thunk.free left right
 
 end FreeFoil.NbE

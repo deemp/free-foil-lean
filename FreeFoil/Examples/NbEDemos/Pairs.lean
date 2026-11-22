@@ -15,18 +15,17 @@ inductive NamedTerm where
 derive_free_foil NamedTerm with Unit, arity
 
 private def reduceProjection (evaluator : NbE.Evaluator sig scope)
-    (field : Fin 2) (arg : NbE.Thunk sig scope) : NbE.Result (Option (NbE.Value sig scope)) := do
-  match ← evaluator.force arg with
+    (field : Fin 2) (pair : NbE.Value sig scope) : NbE.Result (Option (NbE.Value sig scope)) :=
+  match pair with
   | .node .pair fields _ => some <$> evaluator.force (fields field)
   | _ => pure none
 
 def nbeRules : NbE.Rules sig NbE.NoContext where
   reduce evaluator _ op terms children :=
     match op with
-    | .first => reduceProjection evaluator 0 (terms 0)
-    | .second => reduceProjection evaluator 1 (terms 0)
-    | .split => do
-      match ← evaluator.force (terms 0) with
+    | .first => evaluator.eliminate .first terms children 0 (reduceProjection evaluator 0)
+    | .second => evaluator.eliminate .second terms children 0 (reduceProjection evaluator 1)
+    | .split => evaluator.eliminate .split terms children 0 fun
       | .node .pair fields _ =>
         let body := children 0
         some <$> evaluator.instantiate body (fun i => fields (Fin.cast body.binder.arity i))

@@ -16,8 +16,7 @@ derive_free_foil NamedTerm with Unit, arity
 def nbeRules : NbE.Rules sig NbE.NoContext where
   reduce evaluator _ op terms children :=
     match op with
-    | .natrec => do
-      match ← evaluator.force (terms 0) with
+    | .natrec => evaluator.eliminate .natrec terms children 0 fun
       | .node .zero _ _ => some <$> evaluator.force (terms 1)
       | .node .suc args _ =>
         let pred := args 0

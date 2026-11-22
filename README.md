@@ -99,6 +99,42 @@ The pairs example prints `(b, a)`. The naturals example unfolds once and leaves
 a recursion on the free variable `a`. Bound names in the output are generated
 by scope-safe readback.
 
+### Normalize with named definitions
+
+Wrap a language's rules with `Rules.withDefinitions` and pass the definition
+table alongside its usual context. Each `Definitions.define` introduces a fresh
+identifier whose body is scoped over the preceding entries. Undefined names
+remain neutral. A language rule uses `Evaluator.eliminate` to match a principal
+operand when reduction may need to look through a definition.
+
+Readback unfolds definitions by default. Use `withUnfolding .folded` to retain
+their names, including at the head of eliminations. Conversion tries matching
+folded heads before demanding their bodies, regardless of the readback choice.
+
+```lean
+import FreeFoil.Examples.LambdaPi.NbE
+import FreeFoil.Examples.LambdaPi.Program
+
+open FreeFoil FreeFoil.Examples.LambdaPi
+
+#eval (do
+  let identity ← (AST.fromClosed (Raw.lam "x" (Raw.var "x"))).toOption
+  let defs : NbE.Definitions sig [] := .empty
+  let defs := defs.define 0 (by decide) identity
+  let defs := defs.define 1 (by decide) (AST.var ⟨0, by decide⟩)
+  let raw := Raw.lam "x" (Raw.app (Raw.var "alias") (Raw.var "x"))
+  let term ← (AST.fromNamed [1, 0]
+    (fun name => if name == "alias" then some ⟨1, by decide⟩ else none) raw).toOption
+  let rules := nbeRules.withDefinitions
+  let value ← (NbE.eval rules 64 ((), defs) term).toOption
+  let folded ← (NbE.quote rules 64 ((), defs.withUnfolding .folded) value).toOption
+  let unfolded ← (NbE.quote rules 64 ((), defs) value).toOption
+  let showTerm (t : Term [1, 0]) :=
+    prettyTerm (t.toNamed [1, 0] fun name => if name.id == 0 then "id" else "alias")
+  pure (showTerm folded, showTerm unfolded) : Option (String × String))
+-- some ("λ x2. alias x2", "λ x2. x2")
+```
+
 ## Define a signature
 
 Import `FreeFoil` for the generic library. A `Signature` gives each operator an arity for ordinary children and an arity for scoped children. Each scoped child has a pattern shape and a list of distinct names in binding order. The pattern shape determines the number of names, so a signature can use zero-name patterns, single binders, or patterns that bind several names. Operator and pattern shape equality are required for `AST.alphaEquiv`.

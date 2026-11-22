@@ -14,10 +14,9 @@ inductive NamedTerm where
 derive_free_foil NamedTerm with Unit, arity
 
 def nbeRules : NbE.Rules sig NbE.NoContext where
-  reduce evaluator _ op terms _ :=
+  reduce evaluator _ op terms children :=
     match op with
-    | .cond => do
-      match ← evaluator.force (terms 0) with
+    | .cond => evaluator.eliminate .cond terms children 0 fun
       | .node .trueVal _ _ => some <$> evaluator.force (terms 1)
       | .node .falseVal _ _ => some <$> evaluator.force (terms 2)
       | _ => pure none

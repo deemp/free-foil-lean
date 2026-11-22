@@ -9,10 +9,13 @@ inductive Value (sig : Signature) (scope : Scope) where
   | var (name : Name scope)
   | node (op : sig.Op) (terms : Fin (sig.terms op) → Thunk sig scope)
       (children : Fin (sig.scopes op) → Closure sig scope)
+  | glued (name : Name scope) (folded : Value sig scope) (unfolded : Thunk sig scope)
 
 /-- An ordinary argument can be evaluated on demand in its captured environment. -/
 inductive Thunk (sig : Signature) (scope : Scope) where
   | ready (value : Value sig scope)
+  | free (name : Name scope)
+  | defined (name : Name scope) (body : Thunk sig scope)
   | syntax {source : Scope} (term : AST sig source) (env : Name source → Thunk sig scope)
   | node (op : sig.Op) (terms : Fin (sig.terms op) → Thunk sig scope)
       (children : Fin (sig.scopes op) → Closure sig scope)
@@ -37,10 +40,14 @@ def Value.sink (value : Value sig source) (included : source ⊆ target) : Value
   | .var name => .var (name.sink included)
   | .node op terms children =>
     .node op (fun i => (terms i).sink included) (fun i => (children i).sink included)
+  | .glued name folded unfolded =>
+    .glued (name.sink included) (folded.sink included) (unfolded.sink included)
 
 def Thunk.sink (thunk : Thunk sig source) (included : source ⊆ target) : Thunk sig target :=
   match thunk with
   | .ready value => .ready (value.sink included)
+  | .free name => .free (name.sink included)
+  | .defined name body => .defined (name.sink included) (body.sink included)
   | .syntax term env => .syntax term fun name => (env name).sink included
   | .node op terms children =>
     .node op (fun i => (terms i).sink included) (fun i => (children i).sink included)
@@ -93,6 +100,11 @@ inductive Error where
 
 abbrev Result := Except Error
 
+/-- Whether readback preserves references to named definitions. -/
+inductive Unfolding where
+  | folded
+  | unfolded
+
 /-- Context for languages that need only the scope. -/
 abbrev NoContext (_ : Scope) := Unit
 
@@ -105,6 +117,20 @@ structure Evaluator (sig : Signature) (scope : Scope) where
 def Evaluator.instantiate (evaluator : Evaluator sig scope) (closure : Closure sig scope)
     (args : Fin closure.binder.names.length → Thunk sig scope) : Result (Value sig scope) :=
   evaluator.force (closure.instantiate args)
+
+/-- Match the principal operand of an elimination. A definition preserves the
+stuck elimination on its folded side and suspends the same elimination on its body. -/
+def Evaluator.eliminate (evaluator : Evaluator sig scope)
+    (op : sig.Op) (terms : Fin (sig.terms op) → Thunk sig scope)
+    (children : Fin (sig.scopes op) → Closure sig scope) (principal : Fin (sig.terms op))
+    (reduce : Value sig scope → Result (Option (Value sig scope))) :
+    Result (Option (Value sig scope)) := do
+  match ← evaluator.force (terms principal) with
+  | .glued name folded unfolded =>
+    let replace thunk i := if i == principal then thunk else terms i
+    pure (some (.glued name (.node op (replace (.ready folded)) children)
+      (.node op (replace unfolded) children)))
+  | value => reduce value
 
 /-- Eliminators used for one step of η comparison against an introduction form.
 A scoped observer receives the refreshed binder and may decline that pattern. -/
@@ -129,6 +155,9 @@ structure Rules (sig : Signature) (Context : Scope → Type) where
     fun _ _ value => pure value
   isHead : (op : sig.Op) → Fin (sig.terms op) → Bool := fun _ _ => false
   eta : (op : sig.Op) → Option (EtaObservers sig Context op) := fun _ => none
+  definition : ∀ {scope}, Context scope → Name scope → Option (Thunk sig scope) :=
+    fun _ _ => none
+  unfolding : ∀ {scope}, Context scope → Unfolding := fun _ => .unfolded
 
 /-- Use elimination rules without a client context. -/
 def Rules.scopeOnly
@@ -154,6 +183,9 @@ def force (rules : Rules sig Context) (fuel : Nat) (ctx : Context scope)
     let evaluator : Evaluator sig scope := ⟨force rules fuel ctx⟩
     match thunk with
     | .ready value => pure value
+    | .free name =>
+      pure (((rules.definition ctx name).map (.glued name (.var name))).getD (.var name))
+    | .defined name body => pure (.glued name (.var name) body)
     | .syntax term env => evaluator.force (suspend term env)
     | .node op terms children => do
       let result ← rules.reduce evaluator ctx op terms children
@@ -164,10 +196,17 @@ def evalUnder (rules : Rules sig Context) (fuel : Nat) (ctx : Context scope)
     (env : Name source → Thunk sig scope) (term : AST sig source) : Result (Value sig scope) :=
   force rules fuel ctx (suspend term env)
 
-/-- Evaluate a scope-checked term with its free names as neutrals. -/
+/-- Evaluate a scope-checked term, resolving its free names through the context. -/
 def eval (rules : Rules sig Context) (fuel : Nat) (ctx : Context scope)
     (term : AST sig scope) : Result (Value sig scope) :=
-  evalUnder rules fuel ctx Thunk.var term
+  evalUnder rules fuel ctx Thunk.free term
+
+/-- Refine the chosen side of a definition when readback or comparison reaches it. -/
+def Rules.refineHead (rules : Rules sig Context) (evaluator : Evaluator sig scope)
+    (ctx : Context scope) (value : Value sig scope) : Result (Value sig scope) :=
+  match value with
+  | .glued .. => pure value
+  | _ => rules.refine evaluator ctx value
 
 private def mapPositions (f : Fin n → Result α) : Result (Fin n → α) := do
   let values ← (Vector.ofFn id : Vector (Fin n) n).mapM f
@@ -213,9 +252,14 @@ private def readback (rules : Rules sig Context) (fuel : Nat) (ctx : Context sco
   | 0 => .error .outOfFuel
   | fuel + 1 => do
     let evaluator : Evaluator sig scope := ⟨force rules fuel ctx⟩
-    let value ← if refine then rules.refine evaluator ctx value else pure value
+    let value ← if refine then rules.refineHead evaluator ctx value else pure value
     match value with
     | .var name => pure (.var name)
+    | .glued _ folded unfolded => do
+      let chosen ← match rules.unfolding ctx with
+        | .folded => pure folded
+        | .unfolded => evaluator.force unfolded
+      readback rules fuel ctx underBinders refine chosen
     | .node op terms children =>
       let readTerm i := do
         let value ← evaluator.force (terms i)
@@ -228,9 +272,12 @@ private def readback (rules : Rules sig Context) (fuel : Nat) (ctx : Context sco
           let value ← force rules fuel inner (closure.openWith binder.val.names binder.property.1)
           readback rules fuel inner true true value
         else
-          freezeClosure closure binder.val.names binder.property.1 fun thunk => do
-            let value ← evaluator.force thunk
-            readback rules fuel ctx true false value
+          freezeClosure closure binder.val.names binder.property.1 fun thunk =>
+            match thunk with
+            | .free name | .defined name _ => pure (.var name)
+            | _ => do
+              let value ← evaluator.force thunk
+              readback rules fuel ctx true false value
         pure (⟨binder.val, binder.property.2.1, body⟩ : ScopedAST sig scope)
       let terms ← mapPositions readTerm
       let children ← mapPositions readChild
