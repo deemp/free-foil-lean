@@ -55,6 +55,10 @@ The [λΠ example](FreeFoil/Examples/LambdaPi.lean) runs `derive_free_foil Named
 
 Pass several syntax inductives as `derive_free_foil [SourceTerm, SourceType] with Pattern, Pattern.binders` to generate a shared signature for a family. Constructors can refer to any category in the family in ordinary or scoped positions. A constructor can also carry fixed payloads with decidable equality. The generated reverse conversions return `Option` and check the category of each node and child in the shared tree.
 
+Recursive fields can appear inside any combination of `List` and `Option`, such as `List (Option (Source Literal))`. For scoped fields, put `BoundSyntax Pattern Pattern.binders (Source Literal)` at the leaf. The generated helpers preserve the container shape and order. A nested scoped leaf takes a `(Binder, Raw)` pair in a raw helper and a `ScopedAST` in a checked helper.
+
+A source inductive can declare ordinary type parameters, such as `(Literal : Type)`. The generated `Op Literal`, `sig Literal`, `Raw Literal`, and `Term Literal` retain that parameter. Helpers and conversions infer it from their arguments or result. The operator's derived equality uses the equality instances required by its payloads. All categories in a family must have the same number of parameters, and recursive fields must pass them in the original order. The generated signature uses `Type` at universe zero. Indexed inductives, dependent constructor fields, and recursive containers other than `List` and `Option` are unsupported.
+
 ## Second-order abstract syntax
 
 Import `FreeFoil.Examples.SOAS` to build the terms, types, and typing judgments with Lean constructors. `MetaSubst.fromNamed` checks the scope of each replacement and records its ordered parameters. `applySubsts` substitutes metavariable applications simultaneously, and `isSolutionFor` checks whether the resulting sides of each constraint match up to α-equivalence. The suite includes nested substitution and matching examples from the upstream SOAS doctests.
