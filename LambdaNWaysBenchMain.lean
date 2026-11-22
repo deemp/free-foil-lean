@@ -52,7 +52,7 @@ private def compare (group : String) (left right : Term []) : Except String Unit
 
 private structure Options where
   samples : Nat := 5
-  corpus : System.FilePath := "lambda-n-ways/lams"
+  corpus : System.FilePath := "free-foil-repos/lambda-n-ways/lams"
 
 private def parseOptions (options : Options) : List String → Except String Options
   | [] => pure options

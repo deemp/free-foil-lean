@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@Codex'
 created_date: '2026-11-22 21:56'
-updated_date: '2026-11-22 22:01'
+updated_date: '2026-11-22 22:14'
 labels:
   - benchmark
   - free-foil
@@ -14,9 +14,9 @@ references:
   - >-
     https://github.com/KarinaTyulebaeva/lambda-n-ways/tree/1f507f589ec12366757fdc3ee1fa499855615df3
 documentation:
-  - lambda-n-ways/bench/Main.lhs
-  - lambda-n-ways/lib/FreeScoped/Eager/Foil.hs
-  - lambda-n-ways/lib/FreeScoped/Foil.hs
+  - free-foil-repos/lambda-n-ways/bench/Main.lhs
+  - free-foil-repos/lambda-n-ways/lib/FreeScoped/Eager/Foil.hs
+  - free-foil-repos/lambda-n-ways/lib/FreeScoped/Foil.hs
 modified_files:
   - FreeFoil/Benchmarks/LambdaNWaysCorpus.lean
   - FreeFoil/Benchmarks/NbECorpus.lean

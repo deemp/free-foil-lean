@@ -1,9 +1,9 @@
 [submodule "free-foil"]
-	path = free-foil
+	path = free-foil-repos/free-foil
 	url = https://github.com/fizruk/free-foil
 [submodule "free-foil-NBE"]
-	path = free-foil-NBE
+	path = free-foil-repos/free-foil-NBE
 	url = https://github.com/p50000/free-foil-NBE
 [submodule "lambda-n-ways"]
-	path = lambda-n-ways
+	path = free-foil-repos/lambda-n-ways
 	url = https://github.com/KarinaTyulebaeva/lambda-n-ways

@@ -5,7 +5,7 @@ status: Done
 assignee:
   - Codex
 created_date: '2026-11-22 15:34'
-updated_date: '2026-11-22 15:53'
+updated_date: '2026-11-22 22:14'
 labels:
   - nbe
 dependencies: []
@@ -15,9 +15,9 @@ references:
   - >-
     https://github.com/p50000/free-foil-NBE/blob/75e7855a6dc03723ff0198f55774eda50e627249/src/FreeFoil/NbE/Internal/Value.hs
 documentation:
-  - free-foil-NBE/src/FreeFoil/NbE.hs
-  - free-foil-NBE/src/FreeFoil/NbE/Internal/Value.hs
-  - free-foil-NBE/test/Test/LambdaPi.hs
+  - free-foil-repos/free-foil-NBE/src/FreeFoil/NbE.hs
+  - free-foil-repos/free-foil-NBE/src/FreeFoil/NbE/Internal/Value.hs
+  - free-foil-repos/free-foil-NBE/test/Test/LambdaPi.hs
   - FreeFoil/Examples/LambdaPi.lean
 modified_files:
   - FreeFoil.lean

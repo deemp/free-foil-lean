@@ -5,7 +5,7 @@ status: Done
 assignee:
   - Codex
 created_date: '2026-11-22 15:34'
-updated_date: '2026-11-22 21:25'
+updated_date: '2026-11-22 22:14'
 labels:
   - nbe
 dependencies:
@@ -20,11 +20,11 @@ references:
   - >-
     https://github.com/p50000/free-foil-NBE/blob/75e7855a6dc03723ff0198f55774eda50e627249/test/Test/Refinement.hs
 documentation:
-  - free-foil-NBE/CHANGELOG.md
-  - free-foil-NBE/demo/DependentTypes.hs
-  - free-foil-NBE/demo/DependentTypes/Elaborate.hs
-  - free-foil-NBE/test/Test/DependentTypes.hs
-  - free-foil-NBE/test/Test/Refinement.hs
+  - free-foil-repos/free-foil-NBE/CHANGELOG.md
+  - free-foil-repos/free-foil-NBE/demo/DependentTypes.hs
+  - free-foil-repos/free-foil-NBE/demo/DependentTypes/Elaborate.hs
+  - free-foil-repos/free-foil-NBE/test/Test/DependentTypes.hs
+  - free-foil-repos/free-foil-NBE/test/Test/Refinement.hs
 modified_files:
   - FreeFoil/NbE.lean
   - FreeFoil/NbE/Conversion.lean

@@ -5,7 +5,7 @@ status: Done
 assignee:
   - Codex
 created_date: '2026-11-22 15:34'
-updated_date: '2026-11-22 21:00'
+updated_date: '2026-11-22 22:14'
 labels:
   - nbe
 dependencies:
@@ -17,9 +17,9 @@ references:
   - >-
     https://github.com/p50000/free-foil-NBE/blob/75e7855a6dc03723ff0198f55774eda50e627249/test/Test/Glue.hs
 documentation:
-  - free-foil-NBE/src/FreeFoil/NbE/Definitions.hs
-  - free-foil-NBE/test/Test/Definitions.hs
-  - free-foil-NBE/test/Test/Glue.hs
+  - free-foil-repos/free-foil-NBE/src/FreeFoil/NbE/Definitions.hs
+  - free-foil-repos/free-foil-NBE/test/Test/Definitions.hs
+  - free-foil-repos/free-foil-NBE/test/Test/Glue.hs
 parent_task_id: TASK-003
 type: feature
 ordinal: 24000

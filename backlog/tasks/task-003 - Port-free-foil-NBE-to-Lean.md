@@ -5,7 +5,7 @@ status: Done
 assignee:
   - Codex
 created_date: '2026-11-22 15:33'
-updated_date: '2026-11-22 21:50'
+updated_date: '2026-11-22 22:14'
 labels:
   - nbe
   - port
@@ -14,8 +14,8 @@ references:
   - >-
     https://github.com/p50000/free-foil-NBE/tree/75e7855a6dc03723ff0198f55774eda50e627249
 documentation:
-  - free-foil-NBE/README.md
-  - free-foil-NBE/CHANGELOG.md
+  - free-foil-repos/free-foil-NBE/README.md
+  - free-foil-repos/free-foil-NBE/CHANGELOG.md
   - README.md
 type: feature
 ordinal: 20000

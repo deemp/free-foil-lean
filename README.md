@@ -294,7 +294,7 @@ composed fragments in the same run.
 ## Benchmark lambda-n-ways
 
 ```sh
-git submodule update --init lambda-n-ways
+git submodule update --init free-foil-repos/lambda-n-ways
 lake exe lambdaNWaysBench --samples 5
 ```
 
@@ -318,8 +318,8 @@ Use `--samples 1` for a single pass through the corpus.
 It parses the fixtures and prepares the inputs and reference forms before
 timing. Each normalization sample traverses the complete results through
 the reference comparisons and exits with an error if any comparison fails.
-It reads `lambda-n-ways/lams` by default. Use `--corpus LAMS_DIR` to supply
-another directory containing the three `.lam` and three `.nf.lam` files.
+It reads `free-foil-repos/lambda-n-ways/lams` by default. Use `--corpus LAMS_DIR`
+to supply another directory containing the three `.lam` and three `.nf.lam` files.
 
 ## Define a signature
 
